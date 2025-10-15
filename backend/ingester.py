@@ -7,24 +7,50 @@ from sqlalchemy import text
 from .database import get_engine
 
 def fetch_yf(symbol: str, start: str, end: str) -> pd.DataFrame:
+    # yfinance 'end' is exclusive; add one day to include end date
     end_inclusive = (pd.Timestamp(end) + pd.Timedelta(days=1)).date().isoformat()
-    df = yf.download(symbol, start=start, end=end_inclusive, progress=False, auto_adjust=False)
-    if df.empty:
-        return df
-    df = df.rename(columns={
-        'Open': 'open',
-        'High': 'high',
-        'Low': 'low',
-        'Close': 'close',
-        'Adj Close': 'adj_close',
-        'Volume': 'volume'
-    }).reset_index(names='date')
+    df = yf.download(
+        symbol,
+        start=start,
+        end=end_inclusive,
+        progress=False,
+        auto_adjust=False
+    )
+
+    # Ensure DataFrame with expected columns
+    if isinstance(df, pd.Series) or df is None or getattr(df, 'empty', True):
+        return pd.DataFrame(columns=['symbol','date','open','high','low','close','adj_close','volume'])
+
+    # Move index to column and normalize names
+    df = df.reset_index()  # creates 'Date' column
+    # Some yfinance versions return lowercase/uppercase variants; handle both
+    rename_map = {
+        'Date': 'date', 'date': 'date',
+        'Open': 'open', 'open': 'open',
+        'High': 'high', 'high': 'high',
+        'Low': 'low',  'low':  'low',
+        'Close': 'close', 'close': 'close',
+        'Adj Close': 'adj_close', 'adjclose': 'adj_close', 'adj close': 'adj_close', 'AdjClose': 'adj_close',
+        'Volume': 'volume', 'volume': 'volume'
+    }
+    df = df.rename(columns={k:v for k,v in rename_map.items() if k in df.columns})
+
+    # If any required columns are missing, return empty to avoid weird states
+    required = {'date','open','high','low','close','adj_close','volume'}
+    if not required.issubset(set(df.columns)):
+        return pd.DataFrame(columns=['symbol','date','open','high','low','close','adj_close','volume'])
+
     df['symbol'] = symbol.upper()
-    df['date'] = pd.to_datetime(df['date']).dt.date.astype(str)
-    return df[['symbol', 'date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']]
+    df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date.astype(str)
+
+    # Keep only expected columns/order
+    df = df[['symbol','date','open','high','low','close','adj_close','volume']].copy()
+    # Drop any rows with missing date
+    df = df[df['date'].astype(bool)]
+    return df
 
 def upsert_prices(rows: pd.DataFrame) -> int:
-    if rows.empty:
+    if rows is None or rows.empty:
         return 0
     eng = get_engine()
     sql = text("""
@@ -38,19 +64,31 @@ def upsert_prices(rows: pd.DataFrame) -> int:
           adj_close=excluded.adj_close,
           volume=excluded.volume;
     """)
-    records = [
-        {
-            "symbol": str(r["symbol"]),
-            "date": str(r["date"]),
-            "open": float(r["open"]),
-            "high": float(r["high"]),
-            "low": float(r["low"]),
-            "close": float(r["close"]),
-            "adj_close": float(r["adj_close"]),
-            "volume": int(r["volume"]) if not pd.isna(r["volume"]) else 0
-        }
-        for _, r in rows.iterrows()
-    ]
+    # Build explicit dicts for stable param binding
+    records = []
+    for _, r in rows.iterrows():
+        try:
+            rec = {
+                "symbol": str(r.get("symbol", "")).upper(),
+                "date":   str(r.get("date", "")),
+                "open":   float(r.get("open", float('nan'))),
+                "high":   float(r.get("high", float('nan'))),
+                "low":    float(r.get("low", float('nan'))),
+                "close":  float(r.get("close", float('nan'))),
+                "adj_close": float(r.get("adj_close", float('nan'))),
+                "volume": int(r.get("volume", 0)) if pd.notna(r.get("volume", 0)) else 0
+            }
+        except Exception:
+            # Skip malformed rows
+            continue
+        # Require symbol and date
+        if not rec["symbol"] or not rec["date"]:
+            continue
+        records.append(rec)
+
+    if not records:
+        return 0
+
     with eng.begin() as con:
         con.execute(sql, records)
     return len(records)
