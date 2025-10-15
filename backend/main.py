@@ -1,8 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from datetime import date, datetime, timezone
+from .ingester import ensure_data, load_prices
+from .backtest import run_threshold_strategy
 
-app = FastAPI(title="SSMIF Quant Dev Backend", version="0.1.0")
+app = FastAPI(title="SSMIF Quant Dev Backend", version="0.2.0")
 
 class Health(BaseModel):
     status: str
@@ -21,5 +23,23 @@ class BacktestRequest(BaseModel):
 
 @app.post("/backtest")
 def backtest(req: BacktestRequest):
-    # stub for now
-    return {"message": "backtest stub", "received": req.model_dump()}
+    start = req.start.isoformat()
+    end = req.end.isoformat()
+    # 1) ensure data exists in DB
+    try:
+        ensure_data(req.symbol, start, end)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Data ingestion failed: {e}")
+
+    # 2) load from DB
+    df = load_prices(req.symbol, start, end)
+    if df.empty:
+        raise HTTPException(status_code=404, detail="No data available for given range.")
+
+    # 3) run strategy
+    out = run_threshold_strategy(df, threshold=req.threshold, hold_days=req.hold_days)
+    out["symbol"] = req.symbol.upper()
+    out["start"] = start
+    out["end"] = end
+    out["params"] = {"threshold": req.threshold, "hold_days": req.hold_days}
+    return out
