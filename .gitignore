@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+
+# Node/Frontend
+node_modules/
+.parcel-cache/
+.next/
+dist/
+build/
+*.log
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
