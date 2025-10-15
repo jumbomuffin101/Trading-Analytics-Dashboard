@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime, timezone
 
 app = FastAPI(title="SSMIF Quant Dev Backend", version="0.1.0")
 
@@ -10,10 +10,8 @@ class Health(BaseModel):
 
 @app.get("/health", response_model=Health)
 def health():
-    from datetime import datetime, timezone
     return Health(status="ok", time=datetime.now(timezone.utc).isoformat())
 
-# Placeholder backtest request schema
 class BacktestRequest(BaseModel):
     symbol: str
     start: date
@@ -23,5 +21,5 @@ class BacktestRequest(BaseModel):
 
 @app.post("/backtest")
 def backtest(req: BacktestRequest):
-    # We'll implement: ensure data -> run simple strategy -> compute metrics -> return JSON
+    # stub for now
     return {"message": "backtest stub", "received": req.model_dump()}
