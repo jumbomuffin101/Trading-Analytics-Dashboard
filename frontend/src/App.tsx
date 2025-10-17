@@ -1,10 +1,15 @@
 ﻿import { useMemo, useState, useEffect } from "react";
+
 import axios from "axios";
+// axios client (same as you already have)
 const api = axios.create({
-  baseURL: "/api",
+  baseURL: "/api",          // keep this
   withCredentials: false,
   timeout: 20000,
+  headers: { "Content-Type": "application/json" },
 });
+
+
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   LineChart, Line, ReferenceLine, ReferenceDot, Label

@@ -1,15 +1,20 @@
+# Dockerfile
 FROM python:3.11-slim
 
-# System deps (optional but handy for SSL/timezones)
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && \
-    rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# copy the whole repo (so /backend is present)
-COPY . .
+# System deps (optional but often needed for pandas/numpy etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl && rm -rf /var/lib/apt/lists/*
 
-# Use $PORT provided by Render
-CMD ["sh","-c","python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT"]
+# Copy & install backend deps
+COPY backend/requirements.txt ./requirements.txt
+RUN python -m pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/ ./
+
+# Healthcheck endpoint is nice to have (add /healthz in your FastAPI if not already)
+# Start server – Render provides $PORT; default to 8000 for local runs
+CMD ["sh","-c","uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
