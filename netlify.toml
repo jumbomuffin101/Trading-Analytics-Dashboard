@@ -1,16 +1,14 @@
-﻿[build]
+[build]
   base    = "frontend"
   command = "npm ci && npm run build"
   publish = "frontend/dist"
 
-# Proxy API to your backend (avoids CORS and keeps axios base = /api)
 [[redirects]]
   from = "/api/*"
   to   = "https://ssmif-quant-backend.onrender.com/:splat"
   status = 200
   force  = true
 
-# SPA fallback so client routes work on reload
 [[redirects]]
   from = "/*"
   to   = "/index.html"
