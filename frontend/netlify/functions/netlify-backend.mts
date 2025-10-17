@@ -1,3 +1,5 @@
+# netlify.toml (root)
+
 [build]
   base    = "frontend"
   command = "npm ci && npm run build"
@@ -8,7 +10,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to   = "/.netlify/functions/api"
+  to   = "/.netlify/functions/netlify-backend/:splat"
   status = 200
   force  = true
 
