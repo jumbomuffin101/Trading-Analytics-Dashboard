@@ -5,17 +5,15 @@
 
 [functions]
   directory = "netlify/functions"
-  included_files = ["backend/**"]  # bundle your old backend code with each function
 
-# Frontend SPA fallback
 [[redirects]]
-  from = "/*"
-  to   = "/index.html"
-  status = 200
-
-# API → Netlify Functions
-[[redirects]]
+  # Frontend hits /api/* → our Netlify functions (peek, backtest)
   from = "/api/*"
   to   = "/.netlify/functions/:splat"
   status = 200
   force  = true
+
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
