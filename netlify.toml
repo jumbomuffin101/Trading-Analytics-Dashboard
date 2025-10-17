@@ -5,7 +5,14 @@
 
 [functions]
   directory = "netlify/functions"
-  python_version = "3.11"
+
+# The function folder is netlify/functions/api (with main.py),
+# so configure its runtime explicitly:
+[functions."api"]
+  runtime = "python3.11"
+  included_files = [
+    "netlify/functions/api/backend/**"
+  ]
 
 [[redirects]]
   from = "/api/*"
