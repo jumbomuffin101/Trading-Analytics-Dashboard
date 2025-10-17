@@ -4,15 +4,15 @@
   publish = "dist"
 
 [functions]
-  directory = "frontend/netlify/functions"
+  directory = "netlify/functions"
 
 [[redirects]]
-  from = "/api/*"
-  to   = "/.netlify/functions/api"
+  from   = "/api/*"
+  to     = "/.netlify/functions/netlify-backend/:splat"
   status = 200
   force  = true
 
 [[redirects]]
-  from = "/*"
-  to   = "/index.html"
+  from   = "/*"
+  to     = "/index.html"
   status = 200
