@@ -13,7 +13,6 @@ def _end_inclusive(end: str) -> str:
 def _normalize(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     if df is None or getattr(df, 'empty', True):
         return pd.DataFrame(columns=['symbol','date','open','high','low','close','adj_close','volume'])
-    # Reset index to get a 'Date' column regardless of source
     df = df.reset_index()
     rename_map = {
         'Date':'date','date':'date',
@@ -39,10 +38,8 @@ def _normalize(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
 def fetch_yf(symbol: str, start: str, end: str) -> pd.DataFrame:
     sym = symbol.upper()
     end_inc = _end_inclusive(end)
-    # Try yf.download
     df = yf.download(sym, start=start, end=end_inc, progress=False, auto_adjust=False)
     if getattr(df, 'empty', True):
-        # Try Ticker().history
         try:
             df = yf.Ticker(sym).history(start=start, end=end_inc, auto_adjust=False)
         except Exception:
@@ -50,11 +47,9 @@ def fetch_yf(symbol: str, start: str, end: str) -> pd.DataFrame:
     return _normalize(df, sym)
 
 def fetch_stooq(symbol: str, start: str, end: str) -> pd.DataFrame:
-    # Stooq has some tickers without suffixes; try raw symbol
     sym = symbol.upper()
     try:
         df = pdr.DataReader(sym, data_source='stooq', start=start, end=end)
-        # stooq returns newest->oldest; reverse to oldest->newest
         if isinstance(df, pd.DataFrame) and not df.empty:
             df = df.sort_index()
     except Exception:
@@ -62,20 +57,18 @@ def fetch_stooq(symbol: str, start: str, end: str) -> pd.DataFrame:
     return _normalize(df, sym)
 
 def fetch_synthetic(symbol: str, start: str, end: str) -> pd.DataFrame:
-    # Generate a simple GBM-like synthetic series on business days for offline demo
-    sym = (symbol.upper() + '_SYNTH')
+    # keep the original symbol to simplify downstream queries
+    sym = symbol.upper()
     idx = pd.bdate_range(start, end, tz=None)
     if len(idx) == 0:
         return pd.DataFrame(columns=['symbol','date','open','high','low','close','adj_close','volume'])
     rng = np.random.default_rng(42)
-    # price path
-    mu, sigma = 0.10, 0.25  # annualized drift/vol (toy)
+    mu, sigma = 0.10, 0.25
     dt = 1/252
     steps = rng.normal((mu - 0.5*sigma*sigma)*dt, sigma*np.sqrt(dt), size=len(idx))
     price = 100 * np.exp(np.cumsum(steps))
     close = pd.Series(price, index=idx)
-    # make OHLC with small intraday ranges
-    spread = np.clip(close * 0.005, 0.05, None)  # ~0.5% high/low bands
+    spread = np.clip(close * 0.005, 0.05, None)
     open_ = close.shift(1).fillna(close.iloc[0])
     high = pd.concat([open_, close], axis=1).max(axis=1) + spread
     low  = pd.concat([open_, close], axis=1).min(axis=1) - spread
@@ -132,13 +125,10 @@ def upsert_prices(rows: pd.DataFrame) -> int:
     return len(records)
 
 def ensure_data(symbol: str, start: str, end: str) -> int:
-    # Try yfinance
     df = fetch_yf(symbol, start, end)
     if df.empty:
-        # Try Stooq
         df = fetch_stooq(symbol, start, end)
     if df.empty:
-        # Fallback: synthetic data so the app still works offline
         df = fetch_synthetic(symbol, start, end)
     return upsert_prices(df)
 

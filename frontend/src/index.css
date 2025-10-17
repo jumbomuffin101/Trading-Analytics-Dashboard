@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* App base */
+:root { color-scheme: dark; }
+html, body, #root { height: 100%; }
+body { @apply bg-slate-950 text-slate-100; }
+
+/* Cards, buttons, inputs */
+.card { @apply rounded-2xl bg-slate-900/60 backdrop-blur shadow-card border border-slate-800; }
+
+.btn { @apply px-4 py-2 rounded-lg font-medium transition-colors; }
+.btn-primary { @apply btn bg-bull-600 hover:bg-bull-500 text-white; }
+.btn-ghost { @apply btn bg-slate-800/60 hover:bg-slate-700/60 text-slate-200; }
+
+.input { @apply w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-bull-500; }
+
+/* Table */
+.table th, .table td { @apply p-2 border-b border-slate-800; }
+.table th { @apply text-left text-slate-300; }
+
+/* Chips for quick symbols */
+.chip { @apply px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-200 text-sm cursor-pointer transition-colors; }
+.chip:hover { @apply bg-slate-700; }
+.chip.active { @apply bg-bull-600 text-white border-bull-500; }
+
+/* Slightly larger defaults (optional) */
+body { font-size: 17px; }
+.card { padding: 1.75rem; }
+.table th, .table td { white-space: nowrap; }
+.table thead th { position: sticky; top: 0; background: rgba(2,6,23,.8); backdrop-filter: blur(2px); }
+.table th, .table td { white-space: nowrap; }
+.kpi .value { white-space: nowrap; }
+.table th, .table td { white-space: nowrap; }
