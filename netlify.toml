@@ -6,13 +6,17 @@
 [functions]
   directory = "netlify/functions"
 
+# Optional but nice for Node functions
+# [functions.node_bundler]
+#   value = "esbuild"
+
 [[redirects]]
-  from   = "/api/*"
-  to     = "/.netlify/functions/netlify-backend/:splat"
+  from = "/api/*"
+  to   = "/.netlify/functions/netlify-backend/:splat"
   status = 200
   force  = true
 
 [[redirects]]
-  from   = "/*"
-  to     = "/index.html"
+  from = "/*"
+  to   = "/index.html"
   status = 200
