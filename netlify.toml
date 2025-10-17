@@ -3,13 +3,11 @@
   command = "npm ci && npm run build"
   publish = "dist"
 
-[[redirects]]
-  from = "/api/*"
-  to   = "https://ssmif-quant-backend.onrender.com/:splat"
-  status = 200
-  force  = true
+[functions]
+  directory = "netlify/functions"
+  python_version = "3.11"
 
 [[redirects]]
-  from = "/*"
-  to   = "/index.html"
+  from = "/api/*"
+  to   = "/.netlify/functions/api"
   status = 200
