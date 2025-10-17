@@ -17,5 +17,12 @@
     "strict": true
   },
   "include": ["src/**/*"],
-  "exclude": ["src/_backups/**/*", "node_modules", "dist"]
+  "exclude": [
+    "src/_backups/**/*",
+    "src/**/App_backup*.ts*",
+    "src/**/*_backup*.ts*",
+    "src/**/*backup*.ts*",
+    "node_modules",
+    "dist"
+  ]
 }
