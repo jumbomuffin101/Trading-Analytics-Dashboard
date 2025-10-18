@@ -1,150 +1,189 @@
+# backend/ingester.py
 from __future__ import annotations
-from typing import List, Dict
-import pandas as pd
+
+import datetime as dt
+import time
+import io
+from typing import Literal, Optional, Tuple
+
 import numpy as np
-import yfinance as yf
-from pandas_datareader import data as pdr
-from sqlalchemy import text
-from .database import get_engine
+import pandas as pd
+import requests
 
-def _end_inclusive(end: str) -> str:
-    return (pd.Timestamp(end) + pd.Timedelta(days=1)).date().isoformat()
+try:
+    import yfinance as yf  # keep around as a backup path
+except Exception:
+    yf = None  # type: ignore
 
-def _normalize(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    if df is None or getattr(df, 'empty', True):
-        return pd.DataFrame(columns=['symbol','date','open','high','low','close','adj_close','volume'])
-    df = df.reset_index()
-    rename_map = {
-        'Date':'date','date':'date',
-        'Open':'open','open':'open',
-        'High':'high','high':'high',
-        'Low':'low','low':'low',
-        'Close':'close','close':'close',
-        'Adj Close':'adj_close','AdjClose':'adj_close','adj close':'adj_close','adjclose':'adj_close',
-        'Volume':'volume','volume':'volume'
-    }
-    df = df.rename(columns={k:v for k,v in rename_map.items() if k in df.columns})
-    required = {'date','open','high','low','close','volume'}
-    if not required.issubset(df.columns):
-        return pd.DataFrame(columns=['symbol','date','open','high','low','close','adj_close','volume'])
-    if 'adj_close' not in df.columns:
-        df['adj_close'] = df['close']
-    df['symbol'] = symbol.upper()
-    df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date.astype(str)
-    df = df[['symbol','date','open','high','low','close','adj_close','volume']].copy()
-    df = df[df['date'].astype(bool)]
-    return df
+# Shared session w/ realistic UA (helps reduce throttling)
+_SESSION = requests.Session()
+_SESSION.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36"
+    )
+})
 
-def fetch_yf(symbol: str, start: str, end: str) -> pd.DataFrame:
-    sym = symbol.upper()
-    end_inc = _end_inclusive(end)
-    df = yf.download(sym, start=start, end=end_inc, progress=False, auto_adjust=False)
-    if getattr(df, 'empty', True):
-        try:
-            df = yf.Ticker(sym).history(start=start, end=end_inc, auto_adjust=False)
-        except Exception:
-            df = pd.DataFrame()
-    return _normalize(df, sym)
+# -------------------- utils --------------------
+def _parse_date(s: str | dt.date | dt.datetime) -> dt.date:
+    if isinstance(s, dt.date) and not isinstance(s, dt.datetime):
+        return s
+    return pd.to_datetime(s).date()
 
-def fetch_stooq(symbol: str, start: str, end: str) -> pd.DataFrame:
-    sym = symbol.upper()
-    try:
-        df = pdr.DataReader(sym, data_source='stooq', start=start, end=end)
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            df = df.sort_index()
-    except Exception:
-        df = pd.DataFrame()
-    return _normalize(df, sym)
-
-def fetch_synthetic(symbol: str, start: str, end: str) -> pd.DataFrame:
-    # keep the original symbol to simplify downstream queries
-    sym = symbol.upper()
-    idx = pd.bdate_range(start, end, tz=None)
-    if len(idx) == 0:
-        return pd.DataFrame(columns=['symbol','date','open','high','low','close','adj_close','volume'])
-    rng = np.random.default_rng(42)
-    mu, sigma = 0.10, 0.25
-    dt = 1/252
-    steps = rng.normal((mu - 0.5*sigma*sigma)*dt, sigma*np.sqrt(dt), size=len(idx))
-    price = 100 * np.exp(np.cumsum(steps))
-    close = pd.Series(price, index=idx)
-    spread = np.clip(close * 0.005, 0.05, None)
-    open_ = close.shift(1).fillna(close.iloc[0])
-    high = pd.concat([open_, close], axis=1).max(axis=1) + spread
-    low  = pd.concat([open_, close], axis=1).min(axis=1) - spread
-    vol  = rng.integers(1e5, 5e6, size=len(idx))
-    df = pd.DataFrame({
-        'symbol': sym,
-        'date': idx.date.astype(str),
-        'open': open_.values,
-        'high': high.values,
-        'low':  low.values,
-        'close': close.values,
-        'adj_close': close.values,
-        'volume': vol
-    })
-    return df
-
-def upsert_prices(rows: pd.DataFrame) -> int:
-    if rows is None or rows.empty:
-        return 0
-    eng = get_engine()
-    sql = text("""
-        INSERT INTO prices(symbol,date,open,high,low,close,adj_close,volume)
-        VALUES(:symbol,:date,:open,:high,:low,:close,:adj_close,:volume)
-        ON CONFLICT(symbol,date) DO UPDATE SET
-          open=excluded.open,
-          high=excluded.high,
-          low=excluded.low,
-          close=excluded.close,
-          adj_close=excluded.adj_close,
-          volume=excluded.volume;
-    """)
-    records: List[Dict] = []
-    for _, r in rows.iterrows():
-        try:
-            rec = {
-                'symbol': str(r['symbol']).upper(),
-                'date':   str(r['date']),
-                'open':   float(r['open']),
-                'high':   float(r['high']),
-                'low':    float(r['low']),
-                'close':  float(r['close']),
-                'adj_close': float(r['adj_close']),
-                'volume': int(r['volume']) if pd.notna(r['volume']) else 0
-            }
-        except Exception:
-            continue
-        if not rec['symbol'] or not rec['date']:
-            continue
-        records.append(rec)
-    if not records:
-        return 0
-    with eng.begin() as con:
-        con.execute(sql, records)
-    return len(records)
-
-def ensure_data(symbol: str, start: str, end: str) -> int:
-    df = fetch_yf(symbol, start, end)
-    if df.empty:
-        df = fetch_stooq(symbol, start, end)
-    if df.empty:
-        df = fetch_synthetic(symbol, start, end)
-    return upsert_prices(df)
-
-def load_prices(symbol: str, start: str, end: str) -> pd.DataFrame:
-    eng = get_engine()
-    q = text("""
-        SELECT symbol, date, open, high, low, close, adj_close, volume
-        FROM prices
-        WHERE symbol = :s AND date >= :a AND date <= :b
-        ORDER BY date ASC
-    """)
-    with eng.begin() as con:
-        rows = con.execute(q, {'s': symbol.upper(), 'a': start, 'b': end}).mappings().all()
-    if not rows:
+def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
         return pd.DataFrame()
-    df = pd.DataFrame(rows)
-    df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    df = df.dropna(subset=['date'])
+    df = df.rename(columns={
+        "Open": "open", "High": "high", "Low": "low",
+        "Close": "close", "Adj Close": "adj_close", "Volume": "volume"
+    })
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.set_index("Date")
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index)
+    df.index = df.index.tz_localize(None)
+    keep = [c for c in ["open","high","low","close","volume"] if c in df.columns]
+    if not keep:
+        return pd.DataFrame()
+    df = df[keep].sort_index().dropna(how="any")
     return df
+
+# -------------------- FAST Yahoo Chart API --------------------
+def _fetch_from_yahoo_chart(symbol: str, start: dt.date, end: dt.date, retries: int = 4, backoff: float = 0.5
+                           ) -> Tuple[pd.DataFrame, str]:
+    """
+    Hit Yahoo's v8 chart endpoint directly (fast). Returns (df, "yahoo-chart").
+    """
+    period1 = int(pd.Timestamp(start).tz_localize("UTC").timestamp())
+    # Yahoo period2 is exclusive, add a day to include 'end'
+    period2 = int(pd.Timestamp(end + dt.timedelta(days=1)).tz_localize("UTC").timestamp())
+
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {
+        "period1": period1,
+        "period2": period2,
+        "interval": "1d",
+        "includeAdjustedClose": "true",
+    }
+
+    last_err: Optional[Exception] = None
+    delay = backoff
+    for _ in range(retries):
+        try:
+            r = _SESSION.get(url, params=params, timeout=15)
+            if r.status_code == 429:
+                last_err = RuntimeError("Yahoo rate limit (chart API)")
+            elif r.status_code != 200:
+                last_err = RuntimeError(f"Yahoo chart HTTP {r.status_code}")
+            else:
+                j = r.json()
+                res = j.get("chart", {}).get("result")
+                if not res:
+                    last_err = RuntimeError("Yahoo chart: empty result")
+                else:
+                    result = res[0]
+                    timestamps = result.get("timestamp", [])
+                    indicators = result.get("indicators", {}).get("quote", [{}])[0]
+                    if not timestamps or "close" not in indicators:
+                        last_err = RuntimeError("Yahoo chart: missing fields")
+                    else:
+                        # build DataFrame
+                        idx = pd.to_datetime(np.array(timestamps, dtype="int64"), unit="s", utc=True).tz_convert(None)
+                        df = pd.DataFrame({
+                            "open":  indicators.get("open"),
+                            "high":  indicators.get("high"),
+                            "low":   indicators.get("low"),
+                            "close": indicators.get("close"),
+                            "volume": indicators.get("volume"),
+                        }, index=idx)
+                        df = _clean_df(df)
+                        if not df.empty:
+                            return df, "yahoo"
+        except Exception as e:
+            last_err = e
+        time.sleep(delay)
+        delay *= 2
+
+    raise RuntimeError(f"Yahoo chart API failed: {last_err}")
+
+def _fetch_from_yfinance_download(symbol: str, start: dt.date, end: dt.date, retries: int = 3) -> Tuple[pd.DataFrame, str]:
+    if yf is None:
+        return pd.DataFrame(), "none"
+    end_plus1 = end + dt.timedelta(days=1)
+    delay = 0.6
+    last_err: Optional[Exception] = None
+    for _ in range(retries):
+        try:
+            df = yf.download(
+                symbol,
+                start=start.isoformat(),
+                end=end_plus1.isoformat(),
+                interval="1d",
+                auto_adjust=True,
+                progress=False,
+                threads=False,
+                session=_SESSION,
+            )
+            df = _clean_df(df)
+            if not df.empty:
+                return df, "yahoo"
+        except Exception as e:
+            last_err = e
+        time.sleep(delay); delay *= 2
+    return pd.DataFrame(), "none"
+
+def _fetch_from_stooq(symbol: str, start: dt.date, end: dt.date) -> Tuple[pd.DataFrame, str]:
+    sym = symbol.lower()
+    if not sym.endswith(".us"):
+        sym = f"{sym}.us"
+    url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
+    r = _SESSION.get(url, timeout=20)
+    if r.status_code != 200 or not r.text or "Date,Open,High,Low,Close,Volume" not in r.text:
+        return pd.DataFrame(), "none"
+    df = pd.read_csv(io.StringIO(r.text))
+    df = _clean_df(df)
+    if df.empty:
+        return pd.DataFrame(), "none"
+    mask = (df.index.date >= start) & (df.index.date <= end)
+    return df.loc[mask], "stooq"
+
+def fetch_prices(
+    symbol: str,
+    start: str | dt.date,
+    end: str | dt.date,
+    prefer: Literal["yahoo","auto"] = "yahoo",
+    allow_fallback: bool = False
+) -> Tuple[pd.DataFrame, str]:
+    """
+    Returns (df, source). source is one of {"yahoo", "stooq", "none"}.
+    - prefer="yahoo": try Yahoo chart API (fast), then yfinance.download, then (optionally) stooq
+    - allow_fallback controls whether to return stooq if Yahoo fails
+    """
+    start_d = _parse_date(start)
+    end_d = _parse_date(end)
+    if end_d < start_d:
+        start_d, end_d = end_d, start_d
+
+    # 1) Yahoo fast API
+    try:
+        df, src = _fetch_from_yahoo_chart(symbol, start_d, end_d)
+        if not df.empty:
+            return df, src
+    except Exception:
+        pass
+
+    # 2) yfinance.download backup
+    df, src = _fetch_from_yfinance_download(symbol, start_d, end_d)
+    if not df.empty:
+        return df, src
+
+    # 3) optional stooq fallback
+    if allow_fallback:
+        df, src = _fetch_from_stooq(symbol, start_d, end_d)
+        if not df.empty:
+            return df, src
+
+    # Nothing
+    return pd.DataFrame(), "none"
