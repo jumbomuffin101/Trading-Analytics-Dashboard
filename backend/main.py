@@ -1,114 +1,253 @@
-pip install fastapi uvicorn mangum
-pip freeze > requirements.txt
-
+# backend/main.py
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from typing import Dict, Tuple, List, Any
+from datetime import datetime, timezone
+
+import numpy as np
 import pandas as pd
-from datetime import date, timedelta
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
-from .ingester import ensure_data, load_prices
-from .backtest import run_threshold_strategy
+from ingester import fetch_prices
+from backtest import run_backtest
+from database import init_db, read_prices, upsert_prices
 
-app = FastAPI(title="SSMIF Quant Dev Backend")
+app = FastAPI(title="SSMIF Quant Backend")
 
-# --------- Models ---------
-class PeekRequest(BaseModel):
-    symbol: str
-    start: str  # ISO date
-    end: str    # ISO date
+# CORS for local Vite dev
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class BacktestRequest(PeekRequest):
-    threshold: float
-    hold_days: int
+# Ensure DB tables exist
+init_db()
 
-# --------- Helpers ---------
-def _clamp_dates(start_iso: str, end_iso: str):
-    """Clamp end to yesterday (avoid partial intraday data), and ensure start <= end."""
-    try:
-        s = pd.to_datetime(start_iso).date()
-        e = pd.to_datetime(end_iso).date()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
-    yday = date.today() - timedelta(days=1)
-    if e > yday:
-        e = yday
-    if s > e:
-        s = e
-    return s.isoformat(), e.isoformat(), (e == yday)
+# Simple in-memory cache: (symbol, start, end) -> (timestamp, df, source)
+_PRICE_CACHE: Dict[Tuple[str, str, str], Tuple[float, pd.DataFrame, str]] = {}
+_PRICE_TTL_SECONDS = 15 * 60  # 15 minutes
 
-# --------- Routes ---------
-@app.get("/")
-def index():
-    return {
-        "service": "SSMIF Quant Dev Backend",
-        "endpoints": ["/health", "/peek", "/backtest", "/docs"],
-        "hint": "POST /backtest with {symbol,start,end,threshold,hold_days}",
-    }
+
+def _now_ts() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+def _df_from_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Convert DB rows -> DataFrame with DateTimeIndex."""
+    if not rows:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+    return df
+
+
+def _ensure_db_has_range(symbol: str, start: str, end: str) -> str:
+    """
+    Make sure DB has [start, end] for `symbol`.
+    We fetch from Yahoo Finance (no fallback) and upsert into DB.
+    Returns the source string used.
+    """
+    df, source = fetch_prices(symbol, start, end, prefer="yahoo", allow_fallback=False)
+    if df.empty:
+        raise HTTPException(
+            status_code=429,
+            detail="Yahoo Finance temporarily unavailable for this range.",
+        )
+
+    rows = []
+    for ts, row in df.iterrows():
+        rows.append(
+            {
+                "date": str(pd.to_datetime(ts).date()),
+                "open": float(row.get("open", np.nan)) if "open" in row else None,
+                "high": float(row.get("high", np.nan)) if "high" in row else None,
+                "low": float(row.get("low", np.nan)) if "low" in row else None,
+                "close": float(row["close"]),
+                "volume": float(row.get("volume", np.nan)) if "volume" in row else None,
+            }
+        )
+
+    # Persist with explicit source
+    upsert_prices(symbol, rows, "Yahoo Finance")
+    return "Yahoo Finance"
+
+
+def _get_prices_cached(symbol: str, start: str, end: str) -> Tuple[pd.DataFrame, str]:
+    """Fetch from cache/DB; if DB missing, ingest from Yahoo then read."""
+    key = (symbol.upper(), start, end)
+    now = _now_ts()
+
+    if key in _PRICE_CACHE:
+        ts, df, src = _PRICE_CACHE[key]
+        if now - ts <= _PRICE_TTL_SECONDS:
+            return df.copy(), src
+
+    src = _ensure_db_has_range(symbol, start, end)
+    rows = read_prices(symbol, start, end)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No data in DB after ingest.")
+    df = _df_from_rows(rows)
+
+    _PRICE_CACHE[key] = (now, df.copy(), src)
+    return df, src
+
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"ok": True}
+
 
 @app.post("/peek")
-def peek(req: PeekRequest):
-    start_iso, end_iso, clamped = _clamp_dates(req.start, req.end)
-    ensure_data(req.symbol, start_iso, end_iso)
-    df = load_prices(req.symbol, start_iso, end_iso)
+async def peek_post(req: Request):
+    data = await req.json()
+    symbol = data.get("symbol")
+    start = data.get("start")
+    end = data.get("end")
+    if not (symbol and start and end):
+        raise HTTPException(status_code=400, detail="symbol, start, end are required")
 
-    if df is None or df.empty:
-        raise HTTPException(status_code=400, detail="No data available for given range.")
+    df, _src = _get_prices_cached(symbol, start, end)
+    if "close" not in df.columns or df["close"].empty:
+        raise HTTPException(status_code=404, detail="No closes in range.")
 
-    # stats for UI
-    min_close = float(df["close"].min())
-    median_close = float(df["close"].median())
-    max_close = float(df["close"].max())
-    suggested_threshold = float(df["close"].quantile(0.75))
+    closes = df["close"].astype(float).to_numpy()
+    min_close = float(np.min(closes))
+    median_close = float(np.median(closes))
+    max_close = float(np.max(closes))
+    suggested_threshold = float(np.percentile(closes, 75))
 
-    preview = df[["date", "open", "high", "low", "close"]].copy()
-    preview["date"] = pd.to_datetime(preview["date"]).dt.date.astype(str)
+    tail = df.tail(40).copy()
+    preview: List[Dict[str, Any]] = []
+    for ts, row in tail.iterrows():
+        preview.append(
+            {
+                "date": pd.to_datetime(ts).strftime("%Y-%m-%d"),
+                "open": float(row.get("open", np.nan)) if "open" in row else None,
+                "high": float(row.get("high", np.nan)) if "high" in row else None,
+                "low": float(row.get("low", np.nan)) if "low" in row else None,
+                "close": float(row["close"]),
+            }
+        )
 
-    resp = {
-        "symbol": req.symbol.upper(),
-        "start": start_iso,
-        "end": end_iso,
-        "min_close": min_close,
-        "median_close": median_close,
-        "max_close": max_close,
-        "suggested_threshold": suggested_threshold,
+    return {
+        "symbol": symbol.upper(),
+        "start": start,
+        "end": end,
+        "min_close": round(min_close, 4),
+        "median_close": round(median_close, 4),
+        "max_close": round(max_close, 4),
+        "suggested_threshold": round(suggested_threshold, 4),
         "rows": int(len(df)),
-        "preview": preview.to_dict(orient="records"),
+        "preview": preview,
+        "source": "Yahoo Finance",
     }
-    if clamped:
-        resp["note"] = "End date was clamped to yesterday to avoid partial intraday data."
-    return resp
+
 
 @app.post("/backtest")
-def backtest(req: BacktestRequest):
-    start_iso, end_iso, clamped = _clamp_dates(req.start, req.end)
-    ensure_data(req.symbol, start_iso, end_iso)
-    df = load_prices(req.symbol, start_iso, end_iso)
+async def backtest_post(req: Request):
+    data = await req.json()
+    symbol = data.get("symbol")
+    start = data.get("start")
+    end = data.get("end")
+    threshold = data.get("threshold")
+    hold_days = data.get("hold_days")
 
-    if df is None or df.empty:
-        raise HTTPException(status_code=400, detail="No data available for given range.")
+    if not (symbol and start and end):
+        raise HTTPException(status_code=400, detail="symbol, start, end are required")
+    if threshold is None or not isinstance(threshold, (int, float)):
+        raise HTTPException(status_code=400, detail="threshold must be a number")
+    if hold_days is None or not isinstance(hold_days, int) or hold_days < 1:
+        raise HTTPException(status_code=400, detail="hold_days must be an integer >= 1")
 
-    out = run_threshold_strategy(
+    # Ensure data present (and cached)
+    df, _src = _get_prices_cached(symbol, start, end)
+    if "close" not in df.columns or df["close"].empty:
+        raise HTTPException(status_code=404, detail="No closes in range.")
+
+    # ---------- Dynamic initial equity rule ----------
+    # Default $5,000 for most symbols; if the median close in-range is > $5,000,
+    # bump to $50,000 so we can meaningfully trade high-priced assets.
+    median_close = float(df["close"].median())
+    initial_equity = 5_000.0 if median_close <= 5_000.0 else 50_000.0
+
+    # Run the strategy
+    result = run_backtest(
         df,
-        threshold=float(req.threshold),
-        hold_days=int(req.hold_days),
+        threshold=float(threshold),
+        hold_days=int(hold_days),
+        initial_equity=initial_equity,
     )
 
-    # add a lightweight price series for the "Price" chart
-    price_series = df[["date", "close"]].copy()
-    price_series["date"] = pd.to_datetime(price_series["date"]).dt.date.astype(str)
-    out["price_series"] = price_series.to_dict(orient="records")
+    # ---- Trades payload
+    trades_list = result.get("trades", [])
+    trades_payload = [
+        {
+            "entry_date": t.entry_date if hasattr(t, "entry_date") else t.get("entry_date"),
+            "entry_price": float(t.entry_price if hasattr(t, "entry_price") else t.get("entry_price")),
+            "exit_date": t.exit_date if hasattr(t, "exit_date") else t.get("exit_date"),
+            "exit_price": float(t.exit_price if hasattr(t, "exit_price") else t.get("exit_price")),
+            "pnl": float(t.pnl if hasattr(t, "pnl") else t.get("pnl")),
+            "return_pct": float(t.return_pct if hasattr(t, "return_pct") else t.get("return_pct")),
+        }
+        for t in trades_list
+    ]
 
-    # echo request metadata
-    out["symbol"] = req.symbol.upper()
-    out["start"] = start_iso
-    out["end"] = end_iso
-    out["params"] = {"threshold": float(req.threshold), "hold_days": int(req.hold_days)}
-    if clamped:
-        out["note"] = "End date was clamped to yesterday to avoid partial intraday data."
-    return out
+    # ---- Equity curve payload
+    equity_curve_payload: List[Dict[str, Any]] = []
+    eq_df = result.get("equity_df")
+    if isinstance(eq_df, pd.DataFrame) and not eq_df.empty:
+        for _, row in eq_df.iterrows():
+            equity_curve_payload.append(
+                {"date": str(row["date"]), "equity": float(row["equity"])}
+            )
+
+    # ---- Price series payload (for the "Price" chart)
+    price_series_payload = [
+        {"date": pd.to_datetime(ts).strftime("%Y-%m-%d"), "close": float(row["close"])}
+        for ts, row in df.iterrows()
+    ]
+
+    # ---- Metrics
+    # Some versions of run_backtest may not compute these; guard and compute here if missing.
+    total_pnl = float(result.get("total_pnl", 0.0))
+    win_rate = float(result.get("win_rate", 0.0))
+    ann_return = float(result.get("ann_return", 0.0))
+    max_dd = float(result.get("max_drawdown", 0.0))
+    final_equity = float(result.get("final_equity", initial_equity))
+
+    # Optional extras
+    trade_count = int(result.get("trade_count", len(trades_payload)))
+    if "avg_trade_return" in result:
+        avg_trade_return = float(result["avg_trade_return"])
+    else:
+        avg_trade_return = (
+            sum(t["return_pct"] for t in trades_payload) / trade_count if trade_count else 0.0
+        )
+
+    metrics = {
+        "total_pnl": total_pnl,
+        "win_rate": win_rate,
+        "annualized_return": ann_return,
+        "max_drawdown": max_dd,
+        "final_equity": final_equity,
+        "initial_equity": float(initial_equity),  # reflect dynamic equity
+        "avg_trade_return": avg_trade_return,
+        "trade_count": trade_count,
+    }
+
+    return {
+        "symbol": symbol.upper(),
+        "start": start,
+        "end": end,
+        "params": {"threshold": float(threshold), "hold_days": int(hold_days)},
+        "metrics": metrics,
+        "trades": trades_payload,
+        "equity_curve": equity_curve_payload,
+        "price_series": price_series_payload,
+        "source": "Yahoo Finance",
+    }

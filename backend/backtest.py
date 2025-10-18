@@ -1,9 +1,9 @@
+# backend/backtest.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Any
 import pandas as pd
 import numpy as np
-from datetime import date as _date
 
 @dataclass
 class Trade:
@@ -14,125 +14,130 @@ class Trade:
     pnl: float
     return_pct: float
 
-def max_drawdown(equity: pd.Series) -> float:
-    if equity.empty:
-        return 0.0
-    peak = equity.cummax()
-    dd = (equity - peak) / peak
-    return float(dd.min())
-
-def annualized_return(equity: pd.Series) -> float:
-    if equity.empty:
-        return 0.0
-    start_val, end_val = equity.iloc[0], equity.iloc[-1]
-    days = (equity.index[-1] - equity.index[0]).days or 1
-    years = days / 365.25
-    if years <= 0 or start_val <= 0:
-        return 0.0
-    return float((end_val / start_val) ** (1/years) - 1)
-
-def _clean_prices(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return pd.DataFrame()
-    out = df.copy()
-    # parse, sort
-    out["date"] = pd.to_datetime(out["date"], errors="coerce")
-    out = out.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
-    # keep only positive close
-    out = out[out["close"].notna() & (out["close"] > 0)].copy()
-    # ensure volume exists; treat missing as 1, then drop zeros
-    if "volume" not in out.columns:
-        out["volume"] = 1
-    out["volume"] = out["volume"].fillna(0)
-    out = out[out["volume"] > 0].copy()
-    # drop *today* (avoid intraday/partial rows)
-    today = _date.today()
-    out = out[out["date"].dt.date < today].copy()
-    # reindex
-    return out.reset_index(drop=True)
-
-def run_threshold_strategy(df: pd.DataFrame, threshold: float, hold_days: int, initial_capital: float = 100000.0):
+def run_backtest(
+    df: pd.DataFrame,  # expects ['open','high','low','close'] and DatetimeIndex
+    threshold: float,
+    hold_days: int,
+    initial_equity: float = 100_000.0,
+) -> Dict[str, Any]:
     """
-    Threshold-cross strategy (mark-to-market equity):
-      - Enter long when prev_close <= threshold < close.
-      - Hold for N trading days, then exit at close.
-      - One position at a time, 100% equity sizing.
-      - Filters: no NaN/zero close, no zero volume, drop *today* rows.
+    Strategy:
+      - Enter on a 'cross up': prev close <= threshold AND today close > threshold
+      - Hold for N business days, one position at a time (1 share per trade)
+    Equity:
+      - Starts at initial_equity
+      - Adds raw PnL (exit_px - entry_px) on exit dates
+      - Carried forward daily across the entire span (business days)
     """
-    df = _clean_prices(df)
     if df.empty:
         return {
             "trades": [],
-            "metrics": {
-                "total_pnl": 0.0, "win_rate": 0.0, "annualized_return": 0.0,
-                "max_drawdown": 0.0, "final_equity": initial_capital, "initial_equity": initial_capital,
-            },
-            "equity_curve": [],
+            "equity_df": pd.DataFrame({"date": [], "equity": []}),
+            "total_pnl": 0.0,
+            "win_rate": 0.0,
+            "ann_return": 0.0,
+            "max_drawdown": 0.0,
+            "final_equity": initial_equity,
+            "initial_equity": initial_equity,
+            "avg_trade_return": 0.0,
+            "trade_count": 0,
         }
 
-    last_date = df["date"].max().date()
+    df = df.copy()
+    df = df.sort_index()
+    df["date"] = df.index.strftime("%Y-%m-%d")
     df["prev_close"] = df["close"].shift(1)
+    df["cross_up"] = (df["prev_close"] <= threshold) & (df["close"] > threshold)
+
+    dates = df["date"].tolist()
+    closes = df["close"].tolist()
 
     trades: List[Trade] = []
-    position = None  # (entry_idx, entry_price, shares)
-    cash = initial_capital
-    equity_vals = []
-
-    for i, row in df.iterrows():
-        date = pd.to_datetime(row["date"])
-        close = float(row["close"])
-        prev_close = float(row["prev_close"]) if not np.isnan(row["prev_close"]) else None
-
-        # Enter at today's close on threshold cross
-        if position is None and prev_close is not None and (prev_close <= threshold < close):
-            shares = cash / close
-            position = (i, close, shares)
-
-        # Mark-to-market equity for the day
-        equity_today = cash if position is None else position[2] * close
-        equity_vals.append((date, equity_today))
-
-        # Exit after hold_days at close
-        if position is not None and (i - position[0]) >= hold_days:
-            entry_i, entry_px, shares = position
-            exit_px = close
-            pnl = (exit_px - entry_px) * shares
-            ret = (exit_px / entry_px) - 1.0
-            entry_date = pd.to_datetime(df.loc[entry_i, "date"]).date()
-            exit_date = date.date()
-            if exit_date <= last_date:
-                trades.append(Trade(
-                    entry_date=str(entry_date),
-                    entry_price=float(entry_px),
-                    exit_date=str(exit_date),
-                    exit_price=float(exit_px),
+    i = 0
+    n = len(df)
+    while i < n:
+        if bool(df["cross_up"].iloc[i]):
+            entry_idx = i
+            # hold_days counts business bars, not calendar
+            exit_idx = min(i + hold_days, n - 1)
+            entry_px = float(closes[entry_idx])
+            exit_px = float(closes[exit_idx])
+            pnl = exit_px - entry_px             # 1 share PnL
+            ret = pnl / entry_px if entry_px else 0.0
+            trades.append(
+                Trade(
+                    entry_date=dates[entry_idx],
+                    entry_price=entry_px,
+                    exit_date=dates[exit_idx],
+                    exit_price=exit_px,
                     pnl=float(pnl),
                     return_pct=float(ret),
-                ))
-                cash = equity_today
-            position = None
+                )
+            )
+            i = exit_idx + 1
+        else:
+            i += 1
 
-    eq_series = pd.Series([v for _, v in equity_vals],
-                          index=[d for d, _ in equity_vals]).sort_index()
+    # ---- Build equity curve across entire span (business days), add PnL on exit days
+    pnl_by_exit: Dict[str, float] = {}
+    for t in trades:
+        pnl_by_exit[t.exit_date] = pnl_by_exit.get(t.exit_date, 0.0) + t.pnl
+
+    # full span regardless of trades; ensures short ranges draw correctly
+    span_start = df.index[0]
+    span_end   = df.index[-1]
+    idx = pd.date_range(span_start, span_end, freq="B")
+
+    eq = float(initial_equity)
+    rows = []
+    # write an initial point on the first business day so the chart starts at initial_equity
+    first_point_written = False
+    for d in idx:
+        dstr = d.strftime("%Y-%m-%d")
+        if not first_point_written:
+            rows.append({"date": dstr, "equity": eq})
+            first_point_written = True
+        pnl_today = pnl_by_exit.get(dstr, 0.0)
+        if pnl_today != 0.0:
+            eq += pnl_today
+        rows.append({"date": dstr, "equity": eq})
+    equity_df = pd.DataFrame(rows).drop_duplicates(subset=["date"], keep="last")
+
+    final_equity = float(equity_df["equity"].iloc[-1]) if not equity_df.empty else initial_equity
+
+    # Max drawdown
+    def _mdd(series: pd.Series) -> float:
+        if series.empty:
+            return 0.0
+        peak = series.cummax()
+        dd = (series - peak) / peak
+        return float(dd.min())
+
+    max_drawdown = _mdd(equity_df["equity"]) if not equity_df.empty else 0.0
+
+    # Annualized return based on first & last dates in the span
+    if not equity_df.empty:
+        d0 = pd.to_datetime(equity_df["date"].iloc[0])
+        d1 = pd.to_datetime(equity_df["date"].iloc[-1])
+        days = max((d1 - d0).days, 1)
+        years = days / 365.25
+        ann_return = (final_equity / initial_equity) ** (1 / years) - 1 if years > 0 else 0.0
+    else:
+        ann_return = 0.0
 
     total_pnl = float(sum(t.pnl for t in trades))
-    wins = sum(1 for t in trades if t.pnl > 0)
-    win_rate = float((wins / len(trades)) if trades else 0.0)
-    ann_ret = annualized_return(eq_series)
-    mdd = max_drawdown(eq_series)
+    win_rate = float(np.mean([1.0 if t.pnl > 0 else 0.0 for t in trades])) if trades else 0.0
+    avg_trade_return = float(np.mean([t.return_pct for t in trades])) if trades else 0.0
 
     return {
-        "trades": [t.__dict__ for t in trades],
-        "metrics": {
-            "total_pnl": total_pnl,
-            "win_rate": win_rate,
-            "annualized_return": ann_ret,
-            "max_drawdown": mdd,
-            "final_equity": float(eq_series.iloc[-1]) if not eq_series.empty else float(initial_capital),
-            "initial_equity": float(eq_series.iloc[0]) if not eq_series.empty else float(initial_capital),
-        },
-        "equity_curve": [
-            {"date": str(idx.date()), "equity": float(val)}
-            for idx, val in eq_series.items()
-        ],
+        "trades": trades,
+        "equity_df": equity_df,
+        "total_pnl": total_pnl,
+        "win_rate": win_rate,
+        "ann_return": float(ann_return),
+        "max_drawdown": float(max_drawdown),
+        "final_equity": final_equity,
+        "initial_equity": float(initial_equity),
+        "avg_trade_return": avg_trade_return,
+        "trade_count": len(trades),
     }
