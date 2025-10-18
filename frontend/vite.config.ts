@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 // When running `npm run dev` the frontend will proxy API calls to the backend.
 export default defineConfig({
   plugins: [react()],
+  base: "/ssmif-quant-dev/",
   server: {
     host: true,
     port: 5173,
