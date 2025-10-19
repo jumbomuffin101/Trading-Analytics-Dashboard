@@ -511,6 +511,7 @@ function Th({children, onClick}:{children:any; onClick?:()=>void}) {
 }
 
 /* ========== Optimizer Panel (fills card & fits numbers) ========== */
+/* ========== Optimizer Panel (smaller fonts + extra suggestion) ========== */
 function OptimizerPanel({
   result,
   trades,
@@ -520,8 +521,8 @@ function OptimizerPanel({
 }) {
   const wins = trades.filter((t) => t.pnl > 0);
   const losses = trades.filter((t) => t.pnl <= 0);
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
 
-  const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
   const sumWins = sum(wins.map((t) => t.pnl));
   const sumLossAbs = Math.abs(sum(losses.map((t) => t.pnl)));
   const profitFactor =
@@ -533,73 +534,48 @@ function OptimizerPanel({
   const hitRate = trades.length ? wins.length / trades.length : 0;
   const expectancy = avgWin * hitRate - avgLossAbs * (1 - hitRate);
 
-  const bars = trades
-    .map((t) => t.daysBars)
-    .filter((b) => Number.isFinite(b)) as number[];
+  const bars = trades.map((t) => t.daysBars).filter((b) => Number.isFinite(b)) as number[];
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
-  const medBars = bars.length
-    ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)]
-    : 0;
+  const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
   const suggestions: string[] = [];
   if (trades.length < 5)
-    suggestions.push(
-      "Few trades — widen date range or lower the threshold to collect more samples."
-    );
+    suggestions.push("Few trades — widen date range or lower the threshold.");
   if (profitFactor < 1 && trades.length >= 5)
-    suggestions.push(
-      "Profit factor < 1. Raise threshold or shorten hold days to cut losers faster."
-    );
+    suggestions.push("Profit factor < 1 — raise threshold or shorten hold days.");
   if (profitFactor >= 1.3 && hitRate < 0.5)
-    suggestions.push(
-      "Good profit factor with <50% win rate — reward/risk looks healthy; keep losers small."
-    );
+    suggestions.push("Good R/R — keep losers small; don’t chase win rate.");
   if (expectancy <= 0 && trades.length >= 5)
-    suggestions.push(
-      "Negative expectancy. Tune threshold & hold days (use Peek’s suggestion + small increments)."
-    );
+    suggestions.push("Negative expectancy — tune threshold & hold days.");
   if (result.metrics.max_drawdown > 0.2)
-    suggestions.push(
-      "Max drawdown > 20%. Add risk controls (smaller size, tighter exits, or a trend filter)."
-    );
+    suggestions.push("Drawdown > 20% — add risk controls or trend filter.");
   if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10)
-    suggestions.push(
-      "Low annualized return. Try alternative hold days (2–5) or a simple 50D MA trend filter."
-    );
+    suggestions.push("Low annualized return — try 2–5 hold days or MA filter.");
   if (avgBars > Number(result.params.hold_days) + 0.5)
-    suggestions.push(
-      "Average bars exceed configured hold — consider fixed-bar exits or verify date alignment."
-    );
-  if (!suggestions.length)
-    suggestions.push(
-      "Metrics look balanced. Next step: forward-test and compare live vs. backtest."
-    );
+    suggestions.push("Avg bars exceed hold — verify exits or use fixed-bar exits.");
+
+  // Always add one concise general suggestion so the box feels complete
+  suggestions.push("Include fees & slippage in backtests.");
 
   return (
     <div className="card p-6 flex-1 flex flex-col">
-      <h3 className="text-2xl font-bold tracking-tight text-emerald-400 mb-4">
+      <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-400 mb-3">
         Optimizer Insights
       </h3>
 
-      {/* Responsive, full-width stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat
-          label="Profit Factor"
-          value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"}
-        />
+      {/* smaller, tidy tiles; 2 cols on small, 4 on md+ */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <MiniStat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
         <MiniStat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
         <MiniStat label="Hit Rate" value={fmtPct2(hitRate)} />
-        <MiniStat
-          label="Avg Bars (Median)"
-          value={`${avgBars.toFixed(1)} (${medBars})`}
-        />
+        <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      {/* Suggestions grow to fill remaining space so the card uses full height */}
-      <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/40 p-4 flex-1">
-        <div className="text-sm font-semibold text-slate-300 mb-2">Suggestions</div>
-        <ul className="list-disc ml-5 text-slate-300 space-y-1">
-          {suggestions.map((s, i) => (
+      {/* suggestions fill remaining height for a full, balanced card */}
+      <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4 flex-1">
+        <div className="text-[13px] font-semibold text-slate-300 mb-2">Suggestions</div>
+        <ul className="list-disc ml-5 text-[13px] leading-6 text-slate-300 space-y-1">
+          {suggestions.slice(0, 4).map((s, i) => (  // cap to 4 short items to keep it clean
             <li key={i}>{s}</li>
           ))}
         </ul>
@@ -608,19 +584,18 @@ function OptimizerPanel({
   );
 }
 
-/* Stat tile that auto-adjusts number size to fit neatly */
+/* Smaller font stat tile with gentle autosizing for long numbers */
 function MiniStat({ label, value }: { label: string; value: string }) {
   const s = String(value);
-  // Shrink font slightly for long numbers like "+$12,345.67" or "100.00%"
   const size =
-    s.length > 12 ? "text-lg"
-      : s.length > 9 ? "text-xl"
-      : "text-2xl md:text-3xl";
+    s.length > 12 ? "text-base"
+    : s.length > 9  ? "text-lg"
+    : "text-xl";
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 h-24 flex flex-col justify-center">
-      <div className="text-xs leading-4 text-slate-400">{label}</div>
-      <div className={`${size} font-semibold tabular-nums leading-tight`}>
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 h-20 flex flex-col justify-center">
+      <div className="text-[10px] leading-4 text-slate-400">{label}</div>
+      <div className={`${size} md:text-2xl font-semibold tabular-nums leading-tight`}>
         {s}
       </div>
     </div>
