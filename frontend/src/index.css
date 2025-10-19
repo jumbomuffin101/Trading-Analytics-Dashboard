@@ -19,17 +19,30 @@ body { @apply bg-slate-950 text-slate-100; }
 /* Table */
 .table th, .table td { @apply p-2 border-b border-slate-800; }
 .table th { @apply text-left text-slate-300; }
+.table th, .table td { white-space: nowrap; }
+.table thead th { position: sticky; top: 0; background: rgba(2,6,23,.8); backdrop-filter: blur(2px); }
 
 /* Chips for quick symbols */
 .chip { @apply px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-200 text-sm cursor-pointer transition-colors; }
 .chip:hover { @apply bg-slate-700; }
 .chip.active { @apply bg-bull-600 text-white border-bull-500; }
 
-/* Slightly larger defaults (optional) */
+/* Slightly larger defaults */
 body { font-size: 17px; }
 .card { padding: 1.75rem; }
-.table th, .table td { white-space: nowrap; }
-.table thead th { position: sticky; top: 0; background: rgba(2,6,23,.8); backdrop-filter: blur(2px); }
-.table th, .table td { white-space: nowrap; }
+
+/* Support classes if Tailwind theme hasn't defined custom colors */
+.text-bull-400 { color: #34d399; }       /* emerald-400-ish */
+.bg-bull-600 { background-color: #059669; }
+.bg-bull-500 { background-color: #10b981; }
+.border-bull-500 { border-color: #10b981; }
+.focus\:ring-bull-500:focus { box-shadow: 0 0 0 2px #10b981; }
+
+.text-bear-400 { color: #fb7185; }       /* rose-400-ish */
+.bg-bear-600 { background-color: #e11d48; }
+
+/* Card shadow */
+.shadow-card { box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+
+/* Prevent KPI/trade value wrapping */
 .kpi .value { white-space: nowrap; }
-.table th, .table td { white-space: nowrap; }

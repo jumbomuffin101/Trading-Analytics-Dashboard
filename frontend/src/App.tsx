@@ -239,18 +239,12 @@ type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 /* ========================= APP ========================= */
 
 export default function App() {
-  const today = new Date();
-  const yday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-  const ydayISO = yday.toISOString().slice(0,10);
-  const startDefault = new Date(yday); startDefault.setDate(yday.getDate()-120);
-  const startISO = startDefault.toISOString().slice(0,10);
-
-  // CHANGE 1: no default symbol; keep your convenient default dates
-  const [symbol, setSymbol] = useState<string>("");     // was "SPY"
-  const [start, setStart]   = useState<string>(startISO);
-  const [end, setEnd]       = useState<string>(ydayISO);
+  // REQUIRE MANUAL SELECTIONS (no defaults)
+  const [symbol, setSymbol] = useState<string>("");
+  const [start, setStart]   = useState<string>("");
+  const [end, setEnd]       = useState<string>("");
   const [threshold, setThreshold] = useState<string>("");
-  const [holdDays, setHoldDays]   = useState<string>("4");
+  const [holdDays, setHoldDays]   = useState<string>("");
 
   const [peek, setPeek]     = useState<PeekResponse | null>(null);
   const [result, setResult] = useState<BacktestResponse | null>(null);
@@ -262,20 +256,25 @@ export default function App() {
   const [sortKey, setSortKey] = useState<SortKey>("entry_date");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
 
+  // Restore last session (but still allow blanks)
   useEffect(() => {
     try {
       const raw = localStorage.getItem("ssmif-settings");
       if (!raw) return;
       const s = JSON.parse(raw);
-      if (s.symbol) setSymbol(String(s.symbol));
-      if (s.start)  setStart(String(s.start));
-      if (s.end)    setEnd(String(s.end));
+      if (s.symbol !== undefined) setSymbol(String(s.symbol));
+      if (s.start  !== undefined) setStart(String(s.start));
+      if (s.end    !== undefined) setEnd(String(s.end));
       if (s.threshold !== undefined) setThreshold(String(s.threshold));
       if (s.holdDays  !== undefined) setHoldDays(String(s.holdDays));
     } catch {}
   }, []);
 
-  useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
+  // Persist selections
+  useEffect(() => {
+    const payload = JSON.stringify({ symbol, start, end, threshold, holdDays });
+    try { localStorage.setItem("ssmif-settings", payload); } catch {}
+  }, [symbol, start, end, threshold, holdDays]);
 
   const parseThreshold = (): number | null => {
     if (threshold.trim() === "") return null;
@@ -288,13 +287,13 @@ export default function App() {
     return Number.isInteger(n) && n >= 1 ? n : null;
   };
 
-  const canPeek = symbol.trim().length > 0;
+  const canPeek = symbol.trim().length > 0 && start && end;
+  const canRun  = canPeek && parseThreshold() !== null && parseHoldDays() !== null;
 
   const doPeek = async () => {
     setError(null); setResult(null);
     setPeekBusy(true); setLoading(true);
     try {
-      // CHANGE 2 (safe): you were already sending start/end; keep it unchanged
       const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
       setPeek(res.data);
       if (Number.isFinite(res.data?.suggested_threshold)) {
@@ -312,7 +311,7 @@ export default function App() {
       const thr = parseThreshold();
       const hd  = parseHoldDays();
       if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
-      if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
+      if (hd  === null) throw new Error("Hold Days must be a whole number ≥ 1.");
       const res = await api.post<BacktestResponse>("/backtest", {symbol, start, end, threshold: thr, hold_days: hd});
       setResult(res.data);
     } catch (e:any) {
@@ -348,7 +347,6 @@ export default function App() {
     const count = t.length;
     const totalPnL = t.reduce((s,x)=>s+x.pnl,0);
     const wins     = t.filter(x => x.pnl > 0);
-    const losses   = t.filter(x => x.pnl <= 0);
     const winRate  = count ? wins.length / count : 0;
     const best     = count ? Math.max(...t.map(x=>x.pnl)) : 0;
     const worst    = count ? Math.min(...t.map(x=>x.pnl)) : 0;
@@ -394,7 +392,7 @@ export default function App() {
         {/* Peek & symbols */}
         <div className="card p-6 sm:p-7">
           <h3 className="text-2xl font-bold tracking-tight text-bull-400">Peek &amp; Symbols</h3>
-          <div className="text-xs text-slate-400 mt-1 mb-3">All symbols work — these are just popular ones.</div>
+          <div className="text-xs text-slate-400 mt-1 mb-3">Pick a symbol, then choose dates and click Peek.</div>
 
           <div className="flex flex-wrap gap-2 mb-3">
             {PRESETS.map(sym => (
@@ -410,14 +408,17 @@ export default function App() {
               <input className="input" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} list="symbols" placeholder="e.g. AAPL"/>
               <datalist id="symbols">{PRESETS.map(s => <option key={s} value={s} />)}</datalist>
             </label>
-            <label className="text-sm"><div className="mb-1 text-slate-300">Start</div><input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} max={ydayISO}/></label>
-            <label className="text-sm"><div className="mb-1 text-slate-300">End</div><input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} max={ydayISO}/></label>
+            <label className="text-sm"><div className="mb-1 text-slate-300">Start</div><input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} /></label>
+            <label className="text-sm"><div className="mb-1 text-slate-300">End</div><input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} /></label>
           </div>
 
           <div className="flex flex-wrap gap-3 mt-4">
             <button className="btn-primary" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
               {peekBusy ? "Peeking…" : "Peek"}
             </button>
+            {(!symbol || !start || !end) && (
+              <span className="text-xs text-slate-400">Enter symbol, start, and end dates to enable Peek.</span>
+            )}
             {error && <span className="text-bear-400">Error: {error}</span>}
           </div>
         </div>
@@ -428,7 +429,6 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-bold tracking-tight text-bull-400">{peek.symbol} Market Snapshot</h3>
-                {/* Keep your backend-provided dates exactly */}
                 <div className="text-sm text-slate-400">{fmtDate(peek.start)} – {fmtDate(peek.end)}</div>
               </div>
               <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
@@ -457,7 +457,8 @@ export default function App() {
                 <input className={"input " + (hdInvalid ? "ring-2 ring-bear-500" : "")} inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={e=>setHoldDays(e.target.value)} placeholder=">= 1"/>
               </label>
               <div className="sm:col-span-2">
-                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canPeek}>Run Backtest</button>
+                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canRun}>Run Backtest</button>
+                {!canRun && <span className="ml-3 text-xs text-slate-400">Fill all fields (try Peek to auto-suggest threshold).</span>}
               </div>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-[13px] leading-6">
@@ -547,7 +548,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Trades panel: CHANGE 3 – remove flex-grow/min-height so it doesn't leave empty space */}
+            {/* Trades panel (no overlap; horizontal scroll if many) */}
             <div className="flex flex-col">
               <div className="card p-6">
                 <div className="flex items-center justify-center mb-4">
