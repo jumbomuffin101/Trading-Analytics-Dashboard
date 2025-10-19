@@ -139,7 +139,6 @@ export default function App() {
   const [mode, setMode]       = useState<ChartMode>("equity");
   const [sortKey, setSortKey] = useState<SortKey>("entry_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
 
   useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
@@ -206,15 +205,15 @@ export default function App() {
     new Intl.DateTimeFormat("en-US",{year:"numeric",month:"2-digit"}).format(new Date(iso));
   const thrInvalid = threshold.trim() !== "" && parseThreshold() === null;
   const hdInvalid  = holdDays.trim() !== "" && parseHoldDays() === null;
+
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-  } else {
-    setSortKey(key);
-    setSortDir("asc");
-  }
-};
-
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -262,9 +261,10 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-bold tracking-tight text-emerald-400">{peek.symbol} Market Snapshot</h3>
-                  <div className="text-sm text-slate-400">
-                    {fmtDate(start)} – {fmtDate(end)}
-                  </div>
+                {/* Use user-selected dates */}
+                <div className="text-sm text-slate-400">
+                  {fmtDate(start)} – {fmtDate(end)}
+                </div>
               </div>
               <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
             </div>
@@ -316,7 +316,8 @@ export default function App() {
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Backtest Results</h3>
                   <div className="flex items-center gap-2 text-sm text-slate-400">
-                    {fmtDate(start)} - {fmtDate(end)} • {result.symbol}
+                    {/* Use user-selected dates */}
+                    {fmtDate(start)} – {fmtDate(end)} • {result.symbol}
                     <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
                       <button className={"px-3 py-1 rounded-md " + (mode==="equity" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={()=>setMode("equity")}>Equity</button>
                       <button className={"px-3 py-1 rounded-md " + (mode==="price" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={()=>setMode("price")}>Price</button>
@@ -424,12 +425,12 @@ export default function App() {
                       <table className="table text-sm w-full">
                         <thead>
                           <tr>
-                            <Th onClick={()=>{setSortKey("entry_date"); setSortDir(d=>d==="asc"?"desc":"asc");}}>Date In {sortKey==="entry_date" ? (sortDir==="asc"?"^":"v"):""}</Th>
-                            <Th onClick={()=>{setSortKey("exit_date");  setSortDir(d=>d==="asc"?"desc":"asc");}}>Date Out {sortKey==="exit_date" ? (sortDir==="asc"?"^":"v"):""}</Th>
+                            <Th onClick={()=>toggleSort("entry_date")}>Date In {sortKey==="entry_date" ? (sortDir==="asc"?"^":"v"):""}</Th>
+                            <Th onClick={()=>toggleSort("exit_date")}>Date Out {sortKey==="exit_date" ? (sortDir==="asc"?"^":"v"):""}</Th>
                             <Th>Entry</Th><Th>Exit</Th>
-                            <Th onClick={()=>{setSortKey("pnl");        setSortDir(d=>d==="asc"?"desc":"asc");}}>PnL {sortKey==="pnl" ? (sortDir==="asc"?"^":"v"):""}</Th>
-                            <Th onClick={()=>{setSortKey("return_pct"); setSortDir(d=>d==="asc"?"desc":"asc");}}>Return % {sortKey==="return_pct" ? (sortDir==="asc"?"^":"v"):""}</Th>
-                            <Th onClick={()=>{setSortKey("daysBars");   setSortDir(d=>d==="asc"?"desc":"asc");}}>Bars {sortKey==="daysBars" ? (sortDir==="asc"?"^":"v"):""}</Th>
+                            <Th onClick={()=>toggleSort("pnl")}>PnL {sortKey==="pnl" ? (sortDir==="asc"?"^":"v"):""}</Th>
+                            <Th onClick={()=>toggleSort("return_pct")}>Return % {sortKey==="return_pct" ? (sortDir==="asc"?"^":"v"):""}</Th>
+                            <Th onClick={()=>toggleSort("daysBars")}>Bars {sortKey==="daysBars" ? (sortDir==="asc"?"^":"v"):""}</Th>
                           </tr>
                         </thead>
                         <tbody>
@@ -564,7 +565,7 @@ function OptimizerPanel({
         <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      {/* suggestions stick to bottom if there’s spare vertical space */}
+      {/* suggestions stick to bottom if there's spare space */}
       <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div className="text-sm font-semibold text-slate-300 mb-2">Suggestions</div>
         <ul className="list-disc ml-5 text-slate-300 space-y-1">
