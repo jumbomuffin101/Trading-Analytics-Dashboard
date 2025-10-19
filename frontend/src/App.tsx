@@ -119,7 +119,7 @@ type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 
 /* ========== Main App ========== */
 export default function App() {
-  // Blank symbol on load (no restore at all).
+  // Blank symbol on load.
   const today = new Date();
   const yday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   const ydayISO = yday.toISOString().slice(0,10);
@@ -207,12 +207,8 @@ export default function App() {
   const hdInvalid  = holdDays.trim() !== "" && parseHoldDays() === null;
 
   const toggleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
+    if (sortKey === key) setSortDir((d)=> d==="asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
   };
 
   return (
@@ -261,10 +257,8 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-bold tracking-tight text-emerald-400">{peek.symbol} Market Snapshot</h3>
-                {/* Use user-selected dates */}
-                <div className="text-sm text-slate-400">
-                  {fmtDate(start)} – {fmtDate(end)}
-                </div>
+                {/* EXACT user-selected dates */}
+                <div className="text-sm text-slate-400">{fmtDate(start)} – {fmtDate(end)}</div>
               </div>
               <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
             </div>
@@ -316,7 +310,7 @@ export default function App() {
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Backtest Results</h3>
                   <div className="flex items-center gap-2 text-sm text-slate-400">
-                    {/* Use user-selected dates */}
+                    {/* EXACT user-selected dates */}
                     {fmtDate(start)} – {fmtDate(end)} • {result.symbol}
                     <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
                       <button className={"px-3 py-1 rounded-md " + (mode==="equity" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={()=>setMode("equity")}>Equity</button>
@@ -486,7 +480,7 @@ function Th({children, onClick}:{children:any; onClick?:()=>void}) {
   return <th className={"cursor-pointer"} onClick={onClick}>{children}</th>;
 }
 
-/* ========== Optimizer Panel ========== */
+/* ========== Optimizer Panel (fixed layout) ========== */
 function OptimizerPanel({
   result,
   trades,
@@ -518,38 +512,14 @@ function OptimizerPanel({
     : 0;
 
   const suggestions: string[] = [];
-  if (trades.length < 5)
-    suggestions.push(
-      "Few trades — widen date range or lower the threshold to collect more samples."
-    );
-  if (profitFactor < 1 && trades.length >= 5)
-    suggestions.push(
-      "Profit factor < 1. Raise threshold or shorten hold days to cut losers faster."
-    );
-  if (profitFactor >= 1.3 && hitRate < 0.5)
-    suggestions.push(
-      "Good profit factor with <50% win rate — reward/risk looks healthy; keep losers small."
-    );
-  if (expectancy <= 0 && trades.length >= 5)
-    suggestions.push(
-      "Negative expectancy. Tune threshold & hold days (use Peek’s suggestion + small increments)."
-    );
-  if (result.metrics.max_drawdown > 0.2)
-    suggestions.push(
-      "Max drawdown > 20%. Add risk controls (smaller size, tighter exits, or a trend filter)."
-    );
-  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10)
-    suggestions.push(
-      "Low annualized return. Try alternative hold days (2–5) or a simple 50D MA trend filter."
-    );
-  if (avgBars > Number(result.params.hold_days) + 0.5)
-    suggestions.push(
-      "Average bars exceed configured hold — consider fixed-bar exits or verify date alignment."
-    );
-  if (!suggestions.length)
-    suggestions.push(
-      "Metrics look balanced. Next step: forward-test and compare live vs. backtest."
-    );
+  if (trades.length < 5) suggestions.push("Few trades — widen date range or lower the threshold to collect more samples.");
+  if (profitFactor < 1 && trades.length >= 5) suggestions.push("Profit factor < 1. Raise threshold or shorten hold days to cut losers faster.");
+  if (profitFactor >= 1.3 && hitRate < 0.5) suggestions.push("Good profit factor with <50% win rate — reward/risk looks healthy; keep losers small.");
+  if (expectancy <= 0 && trades.length >= 5) suggestions.push("Negative expectancy. Tune threshold & hold days (use Peek’s suggestion + small increments).");
+  if (result.metrics.max_drawdown > 0.2) suggestions.push("Max drawdown > 20%. Add risk controls (smaller size, tighter exits, or a trend filter).");
+  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10) suggestions.push("Low annualized return. Try alternative hold days (2–5) or a simple 50D MA trend filter).");
+  if (avgBars > Number(result.params.hold_days) + 0.5) suggestions.push("Average bars exceed configured hold — consider fixed-bar exits or verify date alignment.");
+  if (!suggestions.length) suggestions.push("Metrics look balanced. Next step: forward-test and compare live vs. backtest.");
 
   return (
     <div className="card p-6 mt-0 flex-1 flex flex-col">
@@ -557,15 +527,15 @@ function OptimizerPanel({
         Optimizer Insights
       </h3>
 
-      {/* compact, uniform boxes */}
+      {/* Clean, compact tiles that don't overlap */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MiniStat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
-        <MiniStat label="Expectancy/Trade" value={fmtSignedMoney2(expectancy)} />
+        <MiniStat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
         <MiniStat label="Hit Rate" value={fmtPct2(hitRate)} />
         <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      {/* suggestions stick to bottom if there's spare space */}
+      {/* Suggestions area */}
       <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div className="text-sm font-semibold text-slate-300 mb-2">Suggestions</div>
         <ul className="list-disc ml-5 text-slate-300 space-y-1">
@@ -580,9 +550,9 @@ function OptimizerPanel({
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 min-h-[76px] flex items-center justify-between">
-      <div className="text-[11px] text-slate-400 whitespace-nowrap mr-3">{label}</div>
-      <div className="text-base sm:text-lg font-semibold tabular-nums whitespace-nowrap leading-snug">
+    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 min-h-[78px] flex flex-col justify-center">
+      <div className="text-[11px] text-slate-400 truncate">{label}</div>
+      <div className="text-lg font-semibold tabular-nums leading-tight">
         {value}
       </div>
     </div>
