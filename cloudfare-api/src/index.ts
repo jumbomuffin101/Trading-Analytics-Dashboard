@@ -1,5 +1,5 @@
 // cloudfare-api/src/index.ts
-// Always returns CORS headers; hardened against throw paths.
+// Robust responses (snake_case + camelCase), numeric defaults, and always-present arrays.
 
 const ALLOW_ORIGIN = "https://jumbomuffin101.github.io"; // domain only
 
@@ -11,26 +11,16 @@ function corsHeaders(origin = ALLOW_ORIGIN) {
     "vary": "origin",
   };
 }
-
 function withCors(resp: Response, origin?: string) {
   const hdrs = new Headers(resp.headers);
-  const ch = corsHeaders(origin);
-  for (const [k, v] of Object.entries(ch)) hdrs.set(k, v);
+  for (const [k, v] of Object.entries(corsHeaders(origin))) hdrs.set(k, v);
   return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: hdrs });
 }
-
 function asJson(data: unknown, status = 200, origin?: string) {
-  return withCors(new Response(JSON.stringify(data), {
-    status,
-    headers: { "content-type": "application/json" },
-  }), origin);
+  return withCors(new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } }), origin);
 }
-
 function asText(msg: string, status = 200, origin?: string) {
-  return withCors(new Response(msg, {
-    status,
-    headers: { "content-type": "text/plain; charset=utf-8" },
-  }), origin);
+  return withCors(new Response(msg, { status, headers: { "content-type": "text/plain; charset=utf-8" } }), origin);
 }
 
 type OHLC = { date: string; open: number; high: number; low: number; close: number };
@@ -62,7 +52,6 @@ async function fetchYahooDaily(symbol: string, start?: string, end?: string): Pr
     } else {
       url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
     }
-
     const res = await fetch(url, { headers: { accept: "application/json" } });
     if (!res.ok) return [];
     const json = (await res.json()) as YahooChartResponse;
@@ -83,7 +72,6 @@ async function fetchYahooDaily(symbol: string, start?: string, end?: string): Pr
     out.sort((a, b) => a.date.localeCompare(b.date));
     return out;
   } catch {
-    // Never throw past here — return empty to be handled gracefully
     return [];
   }
 }
@@ -95,37 +83,43 @@ function median(values: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-async function handlePeek(body: any) {
-  const symbol = (body?.symbol || "SPY").toString().toUpperCase();
-  const start = body?.start ? String(body.start) : undefined;
-  const end   = body?.end   ? String(body.end)   : undefined;
+function num(x: unknown, d = 2): number {
+  const n = typeof x === "number" && isFinite(x) ? x : 0;
+  return +n.toFixed(d);
+}
 
-  const preview = await fetchYahooDaily(symbol, start, end);
+function normalizePeek(symbol: string, preview: OHLC[]) {
   if (!preview.length) {
-    return { detail: "No data for symbol/date range", symbol, preview: [], rows: 0 };
+    return {
+      symbol, start: "", end: "",
+      min_close: 0, median_close: 0, max_close: 0, suggested_threshold: 0,
+      minClose: 0, medianClose: 0, maxClose: 0, suggestedThreshold: 0,
+      rows: 0, preview: [] as OHLC[],
+    };
   }
 
   const closes = preview.map(p => p.close);
-  const min_close = Math.min(...closes);
-  const max_close = Math.max(...closes);
-  const median_close = median(closes);
+  const min_close = num(Math.min(...closes));
+  const max_close = num(Math.max(...closes));
+  const median_close = num(median(closes));
   const suggested_threshold = +(((median_close - min_close) / (max_close - min_close || 1)) / 10).toFixed(3);
 
+  const start = preview[0].date;
+  const end   = preview[preview.length - 1].date;
+
   return {
-    symbol,
-    start: preview[0].date,
-    end: preview[preview.length - 1].date,
-    min_close: +min_close.toFixed(2),
-    median_close: +median_close.toFixed(2),
-    max_close: +max_close.toFixed(2),
-    suggested_threshold,
+    symbol, start, end,
+    min_close, median_close, max_close, suggested_threshold,
+    // aliases (camelCase) in case UI uses them
+    minClose: min_close, medianClose: median_close, maxClose: max_close, suggestedThreshold: suggested_threshold,
     rows: preview.length,
     preview,
   };
 }
 
+type Trade = { entry_date: string; entry_price: number; exit_date: string; exit_price: number; pnl: number; return_pct: number };
+
 function runThresholdBacktest(data: OHLC[], threshold = 0.005, holdDays = 5, equityStart = 1000) {
-  type Trade = { entry_date: string; entry_price: number; exit_date: string; exit_price: number; pnl: number; return_pct: number };
   const trades: Trade[] = [];
   const closes = data.map(d => d.close);
 
@@ -136,35 +130,53 @@ function runThresholdBacktest(data: OHLC[], threshold = 0.005, holdDays = 5, equ
       const pnl = +(exit.close - entry.close);
       const return_pct = +(((exit.close - entry.close) / entry.close) * 100);
       trades.push({
-        entry_date: entry.date, entry_price: +entry.close.toFixed(2),
-        exit_date: exit.date,   exit_price: +exit.close.toFixed(2),
-        pnl: +pnl.toFixed(2), return_pct: +return_pct.toFixed(2),
+        entry_date: entry.date,
+        entry_price: num(entry.close),
+        exit_date: exit.date,
+        exit_price: num(exit.close),
+        pnl: num(pnl),
+        return_pct: num(return_pct),
       });
     }
   }
 
   let equity = equityStart;
-  const equity_curve = [{ date: data[0]?.date ?? "", equity: +equity.toFixed(2) }];
+  const equity_curve = [{ date: data[0]?.date ?? "", equity: num(equity) }];
   for (const t of trades) {
-    equity = +(equity * (1 + t.return_pct / 100)).toFixed(2);
+    equity = num(equity * (1 + t.return_pct / 100));
     equity_curve.push({ date: t.exit_date, equity });
   }
 
   const def: Trade = { entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 };
-  const best_trade  = trades.reduce((a,b)=> a.return_pct >= b.return_pct ? a : b, trades[0] ?? def);
-  const worst_trade = trades.reduce((a,b)=> a.return_pct <= b.return_pct ? a : b, trades[0] ?? def);
+  const best_trade  = trades.length ? trades.reduce((a,b)=> a.return_pct >= b.return_pct ? a : b) : def;
+  const worst_trade = trades.length ? trades.reduce((a,b)=> a.return_pct <= b.return_pct ? a : b) : def;
   const wins = trades.filter(t => t.pnl > 0).length;
-  const win_rate_pct = trades.length ? +((wins / trades.length) * 100).toFixed(2) : 0;
+  const win_rate_pct = trades.length ? num((wins / trades.length) * 100) : 0;
+  const equity_start = equityStart;
+  const equity_end   = equity_curve[equity_curve.length - 1]?.equity ?? equity_start;
 
   return {
     trades,
     equity_curve,
-    equity_start: equityStart,
-    equity_end: equity_curve[equity_curve.length - 1]?.equity ?? equityStart,
+    equity_start, equity_end,
     best_trade, worst_trade,
     total_trades: trades.length,
     win_rate_pct,
+    // camelCase aliases
+    equityCurve: equity_curve,
+    equityStart: equity_start,
+    equityEnd: equity_end,
+    totalTrades: trades.length,
+    winRatePct: win_rate_pct,
   };
+}
+
+async function handlePeek(body: any) {
+  const symbol = (body?.symbol || "SPY").toString().toUpperCase();
+  const start = body?.start ? String(body.start) : undefined;
+  const end   = body?.end   ? String(body.end)   : undefined;
+  const preview = await fetchYahooDaily(symbol, start, end);
+  return normalizePeek(symbol, preview);
 }
 
 async function handleBacktest(body: any) {
@@ -176,14 +188,19 @@ async function handleBacktest(body: any) {
 
   const data = await fetchYahooDaily(symbol, start, end);
   if (!data.length) {
-    return {
-      symbol, start: start ?? "", end: end ?? "",
-      trades: [], equity_curve: [{ date: "", equity: 1000 }],
-      equity_start: 1000, equity_end: 1000,
+    const empty = {
+      trades: [] as Trade[],
+      equity_curve: [{ date: "", equity: 1000 }],
+      equity_start: 1000,
+      equity_end: 1000,
       best_trade: { entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 },
       worst_trade:{ entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 },
-      total_trades: 0, win_rate_pct: 0,
-      detail: "No data for symbol/date range",
+      total_trades: 0,
+      win_rate_pct: 0,
+    };
+    return { symbol, start: start ?? "", end: end ?? "", ...empty,
+      equityCurve: empty.equity_curve, equityStart: empty.equity_start, equityEnd: empty.equity_end,
+      totalTrades: 0, winRatePct: 0,
     };
   }
 
@@ -193,45 +210,26 @@ async function handleBacktest(body: any) {
 
 export default {
   async fetch(req: Request): Promise<Response> {
-    // Read request Origin once (so we can echo it if you ever want dynamic allowlists)
     const origin = req.headers.get("Origin") || ALLOW_ORIGIN;
 
     try {
       const url = new URL(req.url);
       const path = url.pathname;
 
-      // Preflight
-      if (req.method === "OPTIONS") {
-        return withCors(new Response(null), origin);
-      }
-
-      // Health BEFORE POST guard
+      if (req.method === "OPTIONS") return withCors(new Response(null), origin);
       if (req.method === "GET" && (path === "/" || path === "/status")) {
         return asJson({ ok: true, ts: Date.now(), path }, 200, origin);
       }
+      if (req.method !== "POST") return asText("POST only", 405, origin);
 
-      // Only POST for API routes
-      if (req.method !== "POST") {
-        return asText("POST only", 405, origin);
-      }
-
-      // Parse JSON body
       let body: any = {};
-      try {
-        body = await req.json();
-      } catch {
-        return asText("Invalid JSON body", 400, origin);
-      }
+      try { body = await req.json(); } catch { return asText("Invalid JSON body", 400, origin); }
 
-      // Routes
       if (path.endsWith("/peek"))     return asJson(await handlePeek(body), 200, origin);
       if (path.endsWith("/backtest")) return asJson(await handleBacktest(body), 200, origin);
-
       return asText("Unknown route. Use /peek or /backtest.", 404, origin);
     } catch (err: any) {
-      // Absolute last-resort catch — ALWAYS include CORS
-      const message = typeof err?.message === "string" ? err.message : "Internal error";
-      return asJson({ detail: message }, 500, req.headers.get("Origin") || ALLOW_ORIGIN);
+      return asJson({ detail: err?.message ?? "Internal error" }, 500, req.headers.get("Origin") || ALLOW_ORIGIN);
     }
   },
 } satisfies ExportedHandler;
