@@ -262,7 +262,9 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-bold tracking-tight text-emerald-400">{peek.symbol} Market Snapshot</h3>
-                <div className="text-sm text-slate-400">{fmtDate(peek.start)} – {fmtDate(peek.end)}</div>
+                  <div className="text-sm text-slate-400">
+                    {fmtDate(start)} – {fmtDate(end)}
+                  </div>
               </div>
               <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
             </div>
@@ -314,7 +316,7 @@ export default function App() {
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Backtest Results</h3>
                   <div className="flex items-center gap-2 text-sm text-slate-400">
-                    {fmtDate(result.start)} – {fmtDate(result.end)} • {result.symbol}
+                    {fmtDate(start)} - {fmtDate(end)} • {result.symbol}
                     <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
                       <button className={"px-3 py-1 rounded-md " + (mode==="equity" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={()=>setMode("equity")}>Equity</button>
                       <button className={"px-3 py-1 rounded-md " + (mode==="price" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={()=>setMode("price")}>Price</button>
@@ -554,15 +556,15 @@ function OptimizerPanel({
         Optimizer Insights
       </h3>
 
-      {/* Compact stats row */}
+      {/* compact, uniform boxes */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MiniStat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
-        <MiniStat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
+        <MiniStat label="Expectancy/Trade" value={fmtSignedMoney2(expectancy)} />
         <MiniStat label="Hit Rate" value={fmtPct2(hitRate)} />
         <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      {/* Suggestions fill remaining space if needed */}
+      {/* suggestions stick to bottom if there’s spare vertical space */}
       <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div className="text-sm font-semibold text-slate-300 mb-2">Suggestions</div>
         <ul className="list-disc ml-5 text-slate-300 space-y-1">
@@ -575,12 +577,11 @@ function OptimizerPanel({
   );
 }
 
-/* smaller stat box used only in Optimizer */
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3">
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className="text-lg font-semibold tabular-nums whitespace-nowrap leading-snug">
+    <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 min-h-[76px] flex items-center justify-between">
+      <div className="text-[11px] text-slate-400 whitespace-nowrap mr-3">{label}</div>
+      <div className="text-base sm:text-lg font-semibold tabular-nums whitespace-nowrap leading-snug">
         {value}
       </div>
     </div>
