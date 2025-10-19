@@ -384,8 +384,8 @@ export default function App() {
               </div>
 
               {/* Trades + Optimizer */}
-              <div className="flex flex-col">
-                <div className="card p-6">
+              <div className="flex flex-col h-full">
+                <div className="card p-6 mb-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Trades ({tradesWithBars.length})</h3>
                     <div className="flex gap-2 text-xs text-slate-400">
@@ -485,45 +485,103 @@ function Th({children, onClick}:{children:any; onClick?:()=>void}) {
 
 /* ========== Optimizer Panel ========== */
 function OptimizerPanel({
-  result, trades
-}: { result: BacktestResponse; trades: (Trade & { daysBars?: number })[] }) {
-  const wins = trades.filter(t=>t.pnl>0), losses = trades.filter(t=>t.pnl<=0);
-  const sum = (a:number[])=>a.reduce((s,x)=>s+x,0);
-  const sumWins = sum(wins.map(t=>t.pnl));
-  const sumLossAbs = Math.abs(sum(losses.map(t=>t.pnl)));
-  const profitFactor = sumLossAbs===0 ? (sumWins>0?Infinity:0) : sumWins/sumLossAbs;
-  const avgWin = wins.length ? sumWins/wins.length : 0;
-  const avgLossAbs = losses.length ? Math.abs(sum(losses.map(t=>t.pnl))/losses.length) : 0;
-  const hitRate = trades.length ? wins.length/trades.length : 0;
-  const expectancy = avgWin*hitRate - avgLossAbs*(1-hitRate);
-  const bars = trades.map(t=>t.daysBars).filter(b=>Number.isFinite(b)) as number[];
-  const avgBars = bars.length ? sum(bars)/bars.length : 0;
-  const medBars = bars.length ? [...bars].sort((a,b)=>a-b)[Math.floor(bars.length/2)] : 0;
+  result,
+  trades,
+}: {
+  result: BacktestResponse;
+  trades: (Trade & { daysBars?: number })[];
+}) {
+  const wins = trades.filter((t) => t.pnl > 0);
+  const losses = trades.filter((t) => t.pnl <= 0);
+
+  const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+  const sumWins = sum(wins.map((t) => t.pnl));
+  const sumLossAbs = Math.abs(sum(losses.map((t) => t.pnl)));
+  const profitFactor =
+    sumLossAbs === 0 ? (sumWins > 0 ? Infinity : 0) : sumWins / sumLossAbs;
+
+  const avgWin = wins.length ? sumWins / wins.length : 0;
+  const avgLossAbs =
+    losses.length ? Math.abs(sum(losses.map((t) => t.pnl)) / losses.length) : 0;
+  const hitRate = trades.length ? wins.length / trades.length : 0;
+  const expectancy = avgWin * hitRate - avgLossAbs * (1 - hitRate);
+
+  const bars = trades
+    .map((t) => t.daysBars)
+    .filter((b) => Number.isFinite(b)) as number[];
+  const avgBars = bars.length ? sum(bars) / bars.length : 0;
+  const medBars = bars.length
+    ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)]
+    : 0;
 
   const suggestions: string[] = [];
-  if (trades.length < 5) suggestions.push("Few trades — widen date range or lower the threshold to collect more samples.");
-  if (profitFactor < 1 && trades.length >= 5) suggestions.push("Profit factor < 1. Raise threshold or shorten hold days to cut losers faster.");
-  if (profitFactor >= 1.3 && hitRate < 0.5) suggestions.push("Good profit factor with <50% win rate — keep losers small; reward/risk looks healthy.");
-  if (expectancy <= 0 && trades.length >= 5) suggestions.push("Negative expectancy. Tune threshold & hold days (use Peek’s suggestion and small increments).");
-  if (result.metrics.max_drawdown > 0.2) suggestions.push("Max drawdown > 20%. Add risk controls (smaller size, tighter exits, or different threshold regime).");
-  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10) suggestions.push("Low annualized return. Try alternative hold days (2–5) or a simple trend filter (e.g., 50D MA).");
-  if (avgBars > Number(result.params.hold_days) + 0.5) suggestions.push("Avg bars exceed configured hold — consider fixed-bar exits or verify date alignment.");
-  if (!suggestions.length) suggestions.push("Metrics look balanced. Next step: forward-test on newer dates and compare live vs. backtest.");
+  if (trades.length < 5)
+    suggestions.push(
+      "Few trades — widen date range or lower the threshold to collect more samples."
+    );
+  if (profitFactor < 1 && trades.length >= 5)
+    suggestions.push(
+      "Profit factor < 1. Raise threshold or shorten hold days to cut losers faster."
+    );
+  if (profitFactor >= 1.3 && hitRate < 0.5)
+    suggestions.push(
+      "Good profit factor with <50% win rate — reward/risk looks healthy; keep losers small."
+    );
+  if (expectancy <= 0 && trades.length >= 5)
+    suggestions.push(
+      "Negative expectancy. Tune threshold & hold days (use Peek’s suggestion + small increments)."
+    );
+  if (result.metrics.max_drawdown > 0.2)
+    suggestions.push(
+      "Max drawdown > 20%. Add risk controls (smaller size, tighter exits, or a trend filter)."
+    );
+  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10)
+    suggestions.push(
+      "Low annualized return. Try alternative hold days (2–5) or a simple 50D MA trend filter."
+    );
+  if (avgBars > Number(result.params.hold_days) + 0.5)
+    suggestions.push(
+      "Average bars exceed configured hold — consider fixed-bar exits or verify date alignment."
+    );
+  if (!suggestions.length)
+    suggestions.push(
+      "Metrics look balanced. Next step: forward-test and compare live vs. backtest."
+    );
 
   return (
-    <div className="card p-6 mt-6">
-      <h3 className="text-2xl font-bold tracking-tight text-emerald-400 mb-4">Optimizer Insights</h3>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
-        <Stat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
-        <Stat label="Hit Rate" value={fmtPct2(hitRate)} />
-        <Stat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
+    <div className="card p-6 mt-0 flex-1 flex flex-col">
+      <h3 className="text-2xl font-bold tracking-tight text-emerald-400 mb-4">
+        Optimizer Insights
+      </h3>
+
+      {/* Compact stats row */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MiniStat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
+        <MiniStat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
+        <MiniStat label="Hit Rate" value={fmtPct2(hitRate)} />
+        <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
+
+      {/* Suggestions fill remaining space if needed */}
       <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div className="text-sm font-semibold text-slate-300 mb-2">Suggestions</div>
         <ul className="list-disc ml-5 text-slate-300 space-y-1">
-          {suggestions.map((s,i)=>(<li key={i}>{s}</li>))}
+          {suggestions.map((s, i) => (
+            <li key={i}>{s}</li>
+          ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+/* smaller stat box used only in Optimizer */
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3">
+      <div className="text-xs text-slate-400">{label}</div>
+      <div className="text-lg font-semibold tabular-nums whitespace-nowrap leading-snug">
+        {value}
       </div>
     </div>
   );
