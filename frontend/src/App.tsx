@@ -321,7 +321,7 @@ type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 /* ========================= APP ========================= */
 
 export default function App() {
-  // Symbol blank on load; keep date defaults & hold days.
+  // Symbol blank on load (no auto-restore). Keep date defaults & hold days.
   const today = new Date();
   const yday = new Date(
     today.getFullYear(),
@@ -350,19 +350,7 @@ export default function App() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("ssmif-settings");
-      if (!raw) return;
-      const s = JSON.parse(raw);
-      if (s.symbol) setSymbol(String(s.symbol));
-      if (s.start) setStart(String(s.start));
-      if (s.end) setEnd(String(s.end));
-      if (s.threshold !== undefined) setThreshold(String(s.threshold));
-      if (s.holdDays !== undefined) setHoldDays(String(s.holdDays));
-    } catch {}
-  }, []);
-
+  // Keep end date sane if user scrolls into the future.
   useEffect(() => {
     if (end > ydayISO) setEnd(ydayISO);
   }, [end, ydayISO]);
@@ -455,10 +443,11 @@ export default function App() {
     const count = t.length;
     const totalPnL = t.reduce((s, x) => s + x.pnl, 0);
     const wins = t.filter((x) => x.pnl > 0);
+    const losses = t.filter((x) => x.pnl <= 0);
     const winRate = count ? wins.length / count : 0;
     const best = count ? Math.max(...t.map((x) => x.pnl)) : 0;
     const worst = count ? Math.min(...t.map((x) => x.pnl)) : 0;
-    return { count, totalPnL, winRate, best, worst };
+    return { count, totalPnL, winRate, best, worst, wins, losses };
   }, [tradesWithBars]);
 
   const avgTradeReturn = useMemo(() => {
@@ -1100,6 +1089,16 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                {/* ===== Optimizer Insights (new) ===== */}
+                {result && (
+                  <OptimizerPanel
+                    result={result}
+                    trades={(tradesWithBars as any) as (Trade & {
+                      daysBars?: number;
+                    })[]}
+                  />
+                )}
               </div>
             </div>
 
@@ -1164,6 +1163,106 @@ function Kpi({
         {value}
       </div>
       {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+/* -------------------- OPTIMIZER PANEL -------------------- */
+
+function OptimizerPanel({
+  result,
+  trades,
+}: {
+  result: BacktestResponse;
+  trades: (Trade & { daysBars?: number })[];
+}) {
+  const wins = trades.filter((t) => t.pnl > 0);
+  const losses = trades.filter((t) => t.pnl <= 0);
+
+  const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+  const sumWins = sum(wins.map((t) => t.pnl));
+  const sumLossAbs = Math.abs(sum(losses.map((t) => t.pnl)));
+  const profitFactor =
+    sumLossAbs === 0 ? (sumWins > 0 ? Infinity : 0) : sumWins / sumLossAbs;
+
+  const avgWin = wins.length ? sum(wins.map((t) => t.pnl)) / wins.length : 0;
+  const avgLossAbs =
+    losses.length ? Math.abs(sum(losses.map((t) => t.pnl)) / losses.length) : 0;
+  const hitRate = trades.length ? wins.length / trades.length : 0;
+  const expectancy = avgWin * hitRate - avgLossAbs * (1 - hitRate);
+
+  const bars = trades.map((t) => t.daysBars).filter((b) => Number.isFinite(b)) as number[];
+  const avgBars = bars.length ? sum(bars) / bars.length : 0;
+  const medBars = bars.length
+    ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)]
+    : 0;
+
+  const suggestions: string[] = [];
+
+  if (trades.length < 5) {
+    suggestions.push(
+      "Very few trades — widen your date range or lower the threshold to collect more samples."
+    );
+  }
+  if (profitFactor < 1 && trades.length >= 5) {
+    suggestions.push(
+      "Profit factor < 1. Consider raising the threshold or shortening hold days to cut losers faster."
+    );
+  }
+  if (profitFactor >= 1.3 && hitRate < 0.5) {
+    suggestions.push(
+      "Good profit factor with <50% win rate — reward/risk looks healthy. Keep losers small."
+    );
+  }
+  if (expectancy <= 0 && trades.length >= 5) {
+    suggestions.push(
+      "Negative expectancy per trade. Try optimizing threshold and hold days using Peek’s suggestion and small increments."
+    );
+  }
+  if (result.metrics.max_drawdown > 0.2) {
+    suggestions.push(
+      "Max drawdown > 20%. Add risk controls (smaller position size, tighter exit, or different threshold regime)."
+    );
+  }
+  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10) {
+    suggestions.push(
+      "Low annualized return. Test alternative hold days (e.g., 2–5) or add a simple trend filter (e.g., 50D MA)."
+    );
+  }
+  if (avgBars > Number(result.params.hold_days) + 0.5) {
+    suggestions.push(
+      "Average bars exceed configured hold. Check date alignment or consider fixed-bar exits."
+    );
+  }
+  if (!suggestions.length) {
+    suggestions.push(
+      "Metrics look balanced. Next step: forward-test on newer dates and compare live vs. backtest performance."
+    );
+  }
+
+  return (
+    <div className="card p-6 mt-6">
+      <h3 className="text-2xl font-bold tracking-tight text-emerald-400 mb-4">
+        Optimizer Insights
+      </h3>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
+        <Stat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
+        <Stat label="Hit Rate" value={fmtPct2(hitRate)} />
+        <Stat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
+      </div>
+
+      <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        <div className="text-sm font-semibold text-slate-300 mb-2">
+          Suggestions
+        </div>
+        <ul className="list-disc ml-5 text-slate-300 space-y-1">
+          {suggestions.map((s, i) => (
+            <li key={i}>{s}</li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
