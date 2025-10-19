@@ -18,14 +18,6 @@ const api = axios.create({
   timeout: 25000,
 });
 
-// safe number + safe fixed
-const asNum = (v: any, fallback = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-};
-const fixed = (v: any, d = 2) => asNum(v).toFixed(d);
-
-
 const n = (x: unknown, d = 2) => +((typeof x === "number" && isFinite(x) ? x : 0).toFixed(d));
 const pick = <T,>(...cands: T[]) => {
   for (const c of cands) if (c !== undefined && c !== null) return c;
@@ -272,9 +264,10 @@ export default function App() {
   const startDefault = new Date(yday); startDefault.setDate(yday.getDate()-120);
   const startISO = startDefault.toISOString().slice(0,10);
 
-  const [symbol, setSymbol] = useState("SPY");
-  const [start, setStart]   = useState(startISO);
-  const [end, setEnd]       = useState(ydayISO);
+  // START EMPTY: no symbol preselected; dates blank until user picks.
+  const [symbol, setSymbol] = useState("");
+  const [start, setStart]   = useState<string>("");
+  const [end, setEnd]       = useState<string>("");
   const [threshold, setThreshold] = useState<string>("");
   const [holdDays, setHoldDays]   = useState<string>("4");
 
@@ -301,8 +294,14 @@ export default function App() {
     } catch {}
   }, []);
 
-  useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
+  useEffect(() => {
+    if (end && end > ydayISO) setEnd(ydayISO);
+  }, [end, ydayISO]);
 
+  const hasSymbol  = symbol.trim().length > 0;
+  const hasStart   = start.trim().length > 0;
+  const hasEnd     = end.trim().length > 0;
+  const datesValid = !hasStart || !hasEnd || start <= end; // if both set, enforce start<=end
   const parseThreshold = (): number | null => {
     if (threshold.trim() === "") return null;
     const v = Number(threshold);
@@ -314,40 +313,50 @@ export default function App() {
     return Number.isInteger(n) && n >= 1 ? n : null;
   };
 
-const doPeek = async () => {
-  setError(null); setResult(null);
-  setPeekBusy(true); setLoading(true);
-  try {
-    const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
+  const canPeek     = hasSymbol && datesValid;
+  const thrInvalid  = threshold.trim() !== "" && parseThreshold() === null;
+  const hdInvalid   = holdDays.trim()   !== "" && parseHoldDays() === null;
+  const canBacktest = canPeek && !thrInvalid && !hdInvalid;
 
-    // coerce/complete the payload so renders never explode
-    const data: PeekResponse = {
-      symbol: String(res.data?.symbol ?? symbol),
-      start: String(res.data?.start ?? start),
-      end:   String(res.data?.end ?? end),
-      min_close: asNum(res.data?.min_close, 0),
-      median_close: asNum(res.data?.median_close, 0),
-      max_close: asNum(res.data?.max_close, 0),
-      suggested_threshold: asNum(res.data?.suggested_threshold, 0),
-      rows:
-        typeof res.data?.rows === "number"
-          ? res.data.rows
-          : Array.isArray(res.data?.preview) ? res.data.preview.length : 0,
-      preview: Array.isArray(res.data?.preview) ? res.data.preview : [],
-      note: res.data?.note
-    };
+  const doPeek = async () => {
+    setError(null);
+    setResult(null);
+    setPeekBusy(true);
+    setLoading(true);
+    try {
+      const payload: any = { symbol };
+      if (hasStart) payload.start = start;
+      if (hasEnd)   payload.end   = end;
 
-    setPeek(data);
+      const res = await api.post<PeekResponse>("/peek", payload);
 
-    // only set the Threshold input if we have a valid number
-    const sug = asNum(data.suggested_threshold, NaN);
-    if (Number.isFinite(sug)) setThreshold(sug.toFixed(2));
-  } catch (e: any) {
-    setError(e?.response?.data?.detail ?? e.message);
-    setPeek(null);
-  } finally { setPeekBusy(false); setLoading(false); }
-};
+      // Ensure all the numeric fields exist (even if backend returns partial data)
+      const data = {
+        ...res.data,
+        min_close: safeNum(res.data?.min_close, 0),
+        median_close: safeNum(res.data?.median_close, 0),
+        max_close: safeNum(res.data?.max_close, 0),
+        suggested_threshold: safeNum(res.data?.suggested_threshold, 0),
+        rows: safeNum(res.data?.rows, Array.isArray(res.data?.preview) ? res.data.preview.length : 0),
+        preview: Array.isArray(res.data?.preview) ? res.data.preview : [],
+        symbol: String(res.data?.symbol ?? symbol),
+        start: String(res.data?.start ?? start),
+        end: String(res.data?.end ?? end),
+      };
 
+      setPeek(data);
+
+      // Only set threshold input if we have a valid number
+      const sug = safeNum(data.suggested_threshold, NaN);
+      if (Number.isFinite(sug)) setThreshold(sug.toFixed(2));
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? e.message);
+      setPeek(null);
+    } finally {
+      setPeekBusy(false);
+      setLoading(false);
+    }
+  };
 
   const doBacktest = async () => {
     setError(null); setLoading(true); setResult(null);
@@ -356,7 +365,12 @@ const doPeek = async () => {
       const hd  = parseHoldDays();
       if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
       if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
-      const res = await api.post<BacktestResponse>("/backtest", {symbol, start, end, threshold: thr, hold_days: hd});
+
+      const payload: any = { symbol, threshold: thr, hold_days: hd };
+      if (hasStart) payload.start = start;
+      if (hasEnd)   payload.end   = end;
+
+      const res = await api.post<BacktestResponse>("/backtest", payload);
       setResult(res.data);
     } catch (e:any) {
       setError(e?.response?.data?.detail ?? e.message);
@@ -409,9 +423,6 @@ const doPeek = async () => {
     return new Intl.DateTimeFormat("en-US",{year:"numeric", month:"2-digit"}).format(d);
   };
 
-  const thrInvalid = threshold.trim() !== "" && parseThreshold() === null;
-  const hdInvalid  = holdDays.trim() !== "" && parseHoldDays() === null;
-
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d=>d==="asc"?"desc":"asc");
     else { setSortKey(key); setSortDir("asc"); }
@@ -453,12 +464,18 @@ const doPeek = async () => {
               <input className="input" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} list="symbols" placeholder="e.g. AAPL"/>
               <datalist id="symbols">{PRESETS.map(s => <option key={s} value={s} />)}</datalist>
             </label>
-            <label className="text-sm"><div className="mb-1 text-slate-300">Start</div><input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} max={ydayISO}/></label>
-            <label className="text-sm"><div className="mb-1 text-slate-300">End</div><input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} max={ydayISO}/></label>
+            <label className="text-sm">
+              <div className="mb-1 text-slate-300">Start</div>
+              <input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} max={ydayISO} placeholder="YYYY-MM-DD"/>
+            </label>
+            <label className="text-sm">
+              <div className="mb-1 text-slate-300">End</div>
+              <input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} max={ydayISO} placeholder="YYYY-MM-DD"/>
+            </label>
           </div>
 
           <div className="flex flex-wrap gap-3 mt-4">
-            <button className="btn-primary" onClick={doPeek} disabled={loading || peekBusy}>
+            <button className="btn-primary" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
               {peekBusy ? "Peeking…" : "Peek"}
             </button>
             {error && <span className="text-bear-400">Error: {error}</span>}
@@ -471,17 +488,18 @@ const doPeek = async () => {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-bold tracking-tight text-bull-400">{peek.symbol} Market Snapshot</h3>
-                <div className="text-sm text-slate-400">{fmtDate(peek.start)} – {fmtDate(peek.end)}</div>
+                <div className="text-sm text-slate-400">
+                  {fmtDate((start || peek.start))} – {fmtDate((end || peek.end))}
+                </div>
               </div>
               <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
             </div>
             <div className="grid sm:grid-cols-4 gap-4">
-              <Stat label="Min Close"           value={fixed(peek.min_close)} />
-              <Stat label="Median Close"        value={fixed(peek.median_close)} />
-              <Stat label="Max Close"           value={fixed(peek.max_close)} />
-              <Stat label="Suggested Threshold" value={fixed(peek.suggested_threshold)} sub="75th percentile"/>
+              <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
+              <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
+              <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
+              <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile"/>
             </div>
-
           </div>
         )}
 
@@ -500,7 +518,7 @@ const doPeek = async () => {
                 <input className={"input " + (hdInvalid ? "ring-2 ring-bear-500" : "")} inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={e=>setHoldDays(e.target.value)} placeholder=">= 1"/>
               </label>
               <div className="sm:col-span-2">
-                <button className="btn-primary" onClick={doBacktest} disabled={loading}>Run Backtest</button>
+                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canBacktest}>Run Backtest</button>
               </div>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-[13px] leading-6">
@@ -521,7 +539,7 @@ const doPeek = async () => {
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-2xl font-bold tracking-tight text-bull-400">Backtest Results</h3>
                 <div className="flex items-center gap-2 text-sm text-slate-400">
-                  {fmtDate(result.start)} – {fmtDate(result.end)} • {result.symbol}
+                  {fmtDate((start || result.start))} – {fmtDate((end || result.end))} • {result.symbol}
                   <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
                     <button className={"px-3 py-1 rounded-md " + (mode==="equity" ? "bg-bull-600 text-white" : "text-slate-200")} onClick={()=>setMode("equity")}>Equity</button>
                     <button className={"px-3 py-1 rounded-md " + (mode==="price" ? "bg-bull-600 text-white" : "text-slate-200")} onClick={()=>setMode("price")}>Price</button>
@@ -591,8 +609,8 @@ const doPeek = async () => {
             </div>
 
             {/* Trades panel */}
-            <div className="flex flex-col h-full min-h-0">
-              <div className="card p-6 flex-1 min-h-0 overflow-auto">
+            <div className="flex flex-col">
+              <div className="card p-6">
                 <div className="flex items-center justify-center mb-4">
                   <h3 className="text-2xl font-bold tracking-tight text-bull-400">Trades ({tradesWithBars.length})</h3>
                 </div>
@@ -667,7 +685,8 @@ function Kpi({
     <div className="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 w-[180px] text-center">
       <div className="text-[11px] text-slate-400 whitespace-nowrap">{label}</div>
       <div className={`text-lg font-semibold tabular-nums ${toneClass} whitespace-nowrap`}>{value}</div>
-      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>}
+      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>
+      }
     </div>
   );
 }
