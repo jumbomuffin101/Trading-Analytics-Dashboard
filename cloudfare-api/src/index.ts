@@ -1,8 +1,9 @@
 // cloudfare-api/src/index.ts
+// Backend for GitHub Pages frontend using real Yahoo Finance data.
 
-// Allow your GitHub Pages domain (no path)
 const ALLOW_ORIGIN = "https://jumbomuffin101.github.io";
 
+// ---- CORS / helpers ---------------------------------------------------------
 function corsHeaders() {
   return {
     "access-control-allow-origin": ALLOW_ORIGIN,
@@ -11,132 +12,203 @@ function corsHeaders() {
     "vary": "origin",
   };
 }
+const asJson = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...corsHeaders() } });
+const asText = (msg: string, status = 200) =>
+  new Response(msg, { status, headers: { "content-type": "text/plain; charset=utf-8", ...corsHeaders() } });
 
-function asJson(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "content-type": "application/json", ...corsHeaders() },
-  });
+type OHLC = { date: string; open: number; high: number; low: number; close: number };
+
+// ---- Yahoo response typing (fixes “Property 'chart' does not exist on type '{}'.”) ----
+type YahooChartResponse = {
+  chart?: {
+    result?: Array<{
+      timestamp?: number[];
+      indicators?: {
+        quote?: Array<{
+          open?: (number | null)[];
+          high?: (number | null)[];
+          low?: (number | null)[];
+          close?: (number | null)[];
+        }>;
+      };
+    }>;
+    error?: unknown;
+  };
+};
+
+// ---- Yahoo fetchers ----------------------------------------------------------
+async function fetchYahooDaily(symbol: string, start?: string, end?: string): Promise<OHLC[]> {
+  let url: string;
+  if (start && end) {
+    const p1 = Math.floor(new Date(`${start}T00:00:00Z`).getTime() / 1000);
+    const p2 = Math.floor(new Date(`${end}T23:59:59Z`).getTime() / 1000);
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+      symbol
+    )}?period1=${p1}&period2=${p2}&interval=1d&includePrePost=false&events=div%2Csplit`;
+  } else {
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+      symbol
+    )}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
+  }
+
+  const res = await fetch(url, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`Yahoo fetch failed (${res.status})`);
+  const json = (await res.json()) as YahooChartResponse; // <-- typed cast fixes the error
+
+  const result = json.chart?.result?.[0];
+  const ts = result?.timestamp ?? [];
+  const q = result?.indicators?.quote?.[0];
+
+  const o = q?.open ?? [];
+  const h = q?.high ?? [];
+  const l = q?.low ?? [];
+  const c = q?.close ?? [];
+
+  const out: OHLC[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const t = ts[i];
+    if (t == null) continue;
+    const open = Number(o[i]);
+    const high = Number(h[i]);
+    const low = Number(l[i]);
+    const close = Number(c[i]);
+    if (!isFinite(open) || !isFinite(high) || !isFinite(low) || !isFinite(close)) continue;
+    const date = new Date(t * 1000).toISOString().slice(0, 10);
+    out.push({ date, open, high, low, close });
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
 }
 
-function asText(msg: string, status = 200) {
-  return new Response(msg, {
-    status,
-    headers: { "content-type": "text/plain; charset=utf-8", ...corsHeaders() },
-  });
+// ---- Stats / backtest --------------------------------------------------------
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-function makePreview(symbol: string) {
-  // tiny synthetic OHLC series so the UI has numbers to render
-  const today = new Date();
-  const days = 20;
-  const preview = Array.from({ length: days }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - (days - 1 - i));
-    const base = 480 + Math.sin(i / 3) * 8 + i * 0.4; // some movement
-    const open = +(base + Math.random() * 2 - 1).toFixed(2);
-    const close = +(base + Math.random() * 2 - 1).toFixed(2);
-    const high = +Math.max(open, close, base + 3).toFixed(2);
-    const low  = +Math.min(open, close, base - 3).toFixed(2);
-    return {
-      date: d.toISOString().slice(0, 10),
-      open, high, low, close
-    };
-  });
+function runThresholdBacktest(data: OHLC[], threshold = 0.005, holdDays = 5, equityStart = 1000) {
+  type Trade = {
+    entry_date: string;
+    entry_price: number;
+    exit_date: string;
+    exit_price: number;
+    pnl: number;
+    return_pct: number;
+  };
+  const trades: Trade[] = [];
+  const closes = data.map((d) => d.close);
 
-  const closes = preview.map(p => p.close).sort((a,b)=>a-b);
-  const min_close = closes[0];
-  const max_close = closes[closes.length - 1];
-  const median_close = closes[Math.floor(closes.length / 2)];
-  const suggested_threshold = +((median_close - min_close) / (max_close - min_close + 1e-6)).toFixed(2);
+  for (let i = 1; i < data.length - holdDays; i++) {
+    const ret = (closes[i] - closes[i - 1]) / closes[i - 1];
+    if (ret >= threshold) {
+      const entry = data[i];
+      const exit = data[i + holdDays];
+      const pnl = +(exit.close - entry.close);
+      const return_pct = +(((exit.close - entry.close) / entry.close) * 100);
+      trades.push({
+        entry_date: entry.date,
+        entry_price: +entry.close.toFixed(2),
+        exit_date: exit.date,
+        exit_price: +exit.close.toFixed(2),
+        pnl: +pnl.toFixed(2),
+        return_pct: +return_pct.toFixed(2),
+      });
+    }
+  }
+
+  let equity = equityStart;
+  const equity_curve = [{ date: data[0]?.date ?? "", equity: +equity.toFixed(2) }];
+  for (const t of trades) {
+    equity = +(equity * (1 + t.return_pct / 100)).toFixed(2);
+    equity_curve.push({ date: t.exit_date, equity });
+  }
+
+  const def: Trade = { entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 };
+  const best_trade = trades.reduce((a, b) => (a.return_pct >= b.return_pct ? a : b), trades[0] ?? def);
+  const worst_trade = trades.reduce((a, b) => (a.return_pct <= b.return_pct ? a : b), trades[0] ?? def);
+  const wins = trades.filter((t) => t.pnl > 0).length;
+  const win_rate_pct = trades.length ? +((wins / trades.length) * 100).toFixed(2) : 0;
+
+  return {
+    trades,
+    equity_curve,
+    equity_start: equityStart,
+    equity_end: equity_curve[equity_curve.length - 1]?.equity ?? equityStart,
+    best_trade: best_trade ?? def,
+    worst_trade: worst_trade ?? def,
+    total_trades: trades.length,
+    win_rate_pct,
+  };
+}
+
+// ---- Route handlers ----------------------------------------------------------
+async function handlePeek(body: any) {
+  const symbol = (body?.symbol || "SPY").toString().toUpperCase();
+  const start = body?.start ? String(body.start) : undefined;
+  const end = body?.end ? String(body.end) : undefined;
+
+  const preview = await fetchYahooDaily(symbol, start, end);
+  if (preview.length === 0) throw new Error("No data for symbol/date range");
+
+  const closes = preview.map((p) => p.close);
+  const min_close = Math.min(...closes);
+  const max_close = Math.max(...closes);
+  const median_close = median(closes);
+  const suggested_threshold = +(((median_close - min_close) / (max_close - min_close || 1)) / 10).toFixed(3);
 
   return {
     symbol,
     start: preview[0].date,
     end: preview[preview.length - 1].date,
-    min_close,
-    median_close,
-    max_close,
+    min_close: +min_close.toFixed(2),
+    median_close: +median_close.toFixed(2),
+    max_close: +max_close.toFixed(2),
     suggested_threshold,
     rows: preview.length,
-    preview
+    preview,
   };
 }
 
-function makeBacktest(symbol: string) {
-  // simple synthetic trades + equity so UI has numbers
-  const trades = [
-    { entry_date: "2025-09-01", entry_price: 470.12, exit_date: "2025-09-05", exit_price: 478.45 },
-    { entry_date: "2025-09-10", entry_price: 480.00, exit_date: "2025-09-17", exit_price: 474.90 },
-    { entry_date: "2025-10-01", entry_price: 482.30, exit_date: "2025-10-08", exit_price: 490.10 },
-  ].map(t => {
-    const pnl = +(t.exit_price - t.entry_price).toFixed(2);
-    const return_pct = +(((t.exit_price - t.entry_price) / t.entry_price) * 100).toFixed(2);
-    return { ...t, pnl, return_pct };
-  });
+async function handleBacktest(body: any) {
+  const symbol = (body?.symbol || "SPY").toString().toUpperCase();
+  const start = body?.start ? String(body.start) : undefined;
+  const end = body?.end ? String(body.end) : undefined;
+  const threshold = body?.threshold != null ? Number(body.threshold) : 0.005;
+  const holdDays = body?.hold_days != null ? Math.max(1, Number(body.hold_days)) : 5;
 
-  const equity_start = 1000; // you asked to show movement around 1,000
-  const equity_curve = trades.reduce<{ date: string; equity: number; }[]>((acc, t) => {
-    const prev = acc.length ? acc[acc.length - 1].equity : equity_start;
-    const next = +(prev * (1 + t.return_pct / 100)).toFixed(2);
-    acc.push({ date: t.exit_date, equity: next });
-    return acc;
-  }, [{ date: trades[0].entry_date, equity: equity_start }]);
+  const data = await fetchYahooDaily(symbol, start, end);
+  if (data.length === 0) throw new Error("No data for symbol/date range");
 
-  const best_trade = trades.reduce((a,b)=> (a.return_pct > b.return_pct ? a : b));
-  const worst_trade = trades.reduce((a,b)=> (a.return_pct < b.return_pct ? a : b));
-
-  return {
-    symbol,
-    start: trades[0].entry_date,
-    end: trades[trades.length-1].exit_date,
-    equity_start,
-    equity_end: equity_curve[equity_curve.length-1].equity,
-    equity_curve,
-    trades,
-    best_trade,
-    worst_trade,
-    total_trades: trades.length,
-    win_rate_pct: +((trades.filter(t=>t.pnl>0).length / trades.length) * 100).toFixed(2),
-  };
+  const bt = runThresholdBacktest(data, threshold, holdDays, 1000);
+  return { symbol, start: data[0].date, end: data[data.length - 1].date, ...bt };
 }
 
+// ---- Worker fetch ------------------------------------------------------------
 export default {
   async fetch(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    const path = url.pathname;
-
-    // CORS preflight
-    if (req.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders() });
-    }
-
-    // Health endpoint
-    if (req.method === "GET" && (path === "/" || path === "/status")) {
-      return asJson({ ok: true, ts: Date.now(), path });
-    }
-
-    if (req.method !== "POST") {
-      return asText("POST only", 405);
-    }
-
-    let body: any = {};
     try {
-      body = await req.json();
-    } catch {
-      return asText("Invalid JSON body", 400);
+      const url = new URL(req.url);
+      const path = url.pathname;
+
+      if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders() });
+      if (req.method === "GET" && (path === "/" || path === "/status")) return asJson({ ok: true, ts: Date.now(), path });
+      if (req.method !== "POST") return asText("POST only", 405);
+
+      let body: any = {};
+      try {
+        body = await req.json();
+      } catch {
+        return asText("Invalid JSON body", 400);
+      }
+
+      if (path.endsWith("/peek")) return asJson(await handlePeek(body));
+      if (path.endsWith("/backtest")) return asJson(await handleBacktest(body));
+      return asText("Unknown route. Use /peek or /backtest.", 404);
+    } catch (err: any) {
+      return asJson({ detail: err?.message ?? "Internal error" }, 500);
     }
-
-    const symbol = typeof body?.symbol === "string" ? body.symbol : "SPY";
-
-    if (path.endsWith("/peek")) {
-      return asJson(makePreview(symbol));
-    }
-
-    if (path.endsWith("/backtest")) {
-      return asJson(makeBacktest(symbol));
-    }
-
-    return asText("Unknown route. Use /peek or /backtest.", 404);
   },
 } satisfies ExportedHandler;
