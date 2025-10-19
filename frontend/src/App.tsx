@@ -683,13 +683,30 @@ function OptimizerPanel({
   );
 }
 
+/* Adaptive, readable number sizing for Optimizer tiles */
 function MiniStat({ label, value }: { label: string; value: string }) {
   const s = String(value);
-  const size = s.length > 12 ? "text-base" : s.length > 9 ? "text-lg" : "text-xl";
+
+  // Count only significant characters to decide sizing
+  const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
+
+  // Size tiers:
+  // - long values -> smaller
+  // - medium values -> medium
+  // - short values -> larger (but still restrained on small screens)
+  const sizeClass =
+    significantLen > 12
+      ? "text-sm sm:text-base md:text-lg"
+      : significantLen > 9
+      ? "text-base sm:text-lg md:text-xl"
+      : "text-lg sm:text-xl md:text-2xl";
+
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 h-20 flex flex-col justify-center">
-      <div className="text-[10px] leading-4 text-slate-400">{label}</div>
-      <div className={`${size} md:text-2xl font-semibold tabular-nums leading-tight`}>{s}</div>
+      <div className="text-[11px] leading-4 text-slate-400">{label}</div>
+      <div className={`${sizeClass} font-semibold tabular-nums leading-tight`}>
+        {s}
+      </div>
     </div>
   );
 }
