@@ -8,6 +8,9 @@ import "./index.css";
 
 /* ========= AXIOS CLIENT (normalized responses) ========= */
 
+const safeNum = (v: any, fallback = 0) =>
+  Number.isFinite(Number(v)) ? Number(v) : fallback;
+
 const BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 const api = axios.create({
@@ -303,18 +306,46 @@ export default function App() {
     return Number.isInteger(n) && n >= 1 ? n : null;
   };
 
-  const doPeek = async () => {
-    setError(null); setResult(null);
-    setPeekBusy(true); setLoading(true);
-    try {
-      const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
-      setPeek(res.data);
-      setThreshold(res.data.suggested_threshold.toFixed(2));
-    } catch (e:any) {
-      setError(e?.response?.data?.detail ?? e.message);
-      setPeek(null);
-    } finally { setPeekBusy(false); setLoading(false); }
-  };
+const doPeek = async () => {
+  setError(null);
+  setResult(null);
+  setPeekBusy(true);
+  setLoading(true);
+  try {
+    const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
+
+    // Ensure all the numeric fields exist (even if backend returns partial data)
+    const data = {
+      ...res.data,
+      min_close: safeNum(res.data?.min_close, 0),
+      median_close: safeNum(res.data?.median_close, 0),
+      max_close: safeNum(res.data?.max_close, 0),
+      suggested_threshold: safeNum(res.data?.suggested_threshold, 0),
+      rows: safeNum(res.data?.rows, Array.isArray(res.data?.preview) ? res.data.preview.length : 0),
+      preview: Array.isArray(res.data?.preview) ? res.data.preview : [],
+      symbol: String(res.data?.symbol ?? symbol),
+      start: String(res.data?.start ?? start),
+      end: String(res.data?.end ?? end),
+    };
+
+    setPeek(data);
+
+    // Only set threshold input if we have a valid number
+    const sug = safeNum(data.suggested_threshold, NaN);
+    if (Number.isFinite(sug)) {
+      setThreshold(sug.toFixed(2));
+    } else {
+      // leave whatever the user had typed, or clear it
+      // setThreshold("");
+    }
+  } catch (e: any) {
+    setError(e?.response?.data?.detail ?? e.message);
+    setPeek(null);
+  } finally {
+    setPeekBusy(false);
+    setLoading(false);
+  }
+};
 
   const doBacktest = async () => {
     setError(null); setLoading(true); setResult(null);
