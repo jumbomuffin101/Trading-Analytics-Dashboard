@@ -18,6 +18,14 @@ const api = axios.create({
   timeout: 25000,
 });
 
+// safe number + safe fixed
+const asNum = (v: any, fallback = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+const fixed = (v: any, d = 2) => asNum(v).toFixed(d);
+
+
 const n = (x: unknown, d = 2) => +((typeof x === "number" && isFinite(x) ? x : 0).toFixed(d));
 const pick = <T,>(...cands: T[]) => {
   for (const c of cands) if (c !== undefined && c !== null) return c;
@@ -307,45 +315,39 @@ export default function App() {
   };
 
 const doPeek = async () => {
-  setError(null);
-  setResult(null);
-  setPeekBusy(true);
-  setLoading(true);
+  setError(null); setResult(null);
+  setPeekBusy(true); setLoading(true);
   try {
     const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
 
-    // Ensure all the numeric fields exist (even if backend returns partial data)
-    const data = {
-      ...res.data,
-      min_close: safeNum(res.data?.min_close, 0),
-      median_close: safeNum(res.data?.median_close, 0),
-      max_close: safeNum(res.data?.max_close, 0),
-      suggested_threshold: safeNum(res.data?.suggested_threshold, 0),
-      rows: safeNum(res.data?.rows, Array.isArray(res.data?.preview) ? res.data.preview.length : 0),
-      preview: Array.isArray(res.data?.preview) ? res.data.preview : [],
+    // coerce/complete the payload so renders never explode
+    const data: PeekResponse = {
       symbol: String(res.data?.symbol ?? symbol),
       start: String(res.data?.start ?? start),
-      end: String(res.data?.end ?? end),
+      end:   String(res.data?.end ?? end),
+      min_close: asNum(res.data?.min_close, 0),
+      median_close: asNum(res.data?.median_close, 0),
+      max_close: asNum(res.data?.max_close, 0),
+      suggested_threshold: asNum(res.data?.suggested_threshold, 0),
+      rows:
+        typeof res.data?.rows === "number"
+          ? res.data.rows
+          : Array.isArray(res.data?.preview) ? res.data.preview.length : 0,
+      preview: Array.isArray(res.data?.preview) ? res.data.preview : [],
+      note: res.data?.note
     };
 
     setPeek(data);
 
-    // Only set threshold input if we have a valid number
-    const sug = safeNum(data.suggested_threshold, NaN);
-    if (Number.isFinite(sug)) {
-      setThreshold(sug.toFixed(2));
-    } else {
-      // leave whatever the user had typed, or clear it
-      // setThreshold("");
-    }
+    // only set the Threshold input if we have a valid number
+    const sug = asNum(data.suggested_threshold, NaN);
+    if (Number.isFinite(sug)) setThreshold(sug.toFixed(2));
   } catch (e: any) {
     setError(e?.response?.data?.detail ?? e.message);
     setPeek(null);
-  } finally {
-    setPeekBusy(false);
-    setLoading(false);
-  }
+  } finally { setPeekBusy(false); setLoading(false); }
 };
+
 
   const doBacktest = async () => {
     setError(null); setLoading(true); setResult(null);
@@ -474,11 +476,12 @@ const doPeek = async () => {
               <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
             </div>
             <div className="grid sm:grid-cols-4 gap-4">
-              <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
-              <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
-              <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
-              <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile"/>
+              <Stat label="Min Close"           value={fixed(peek.min_close)} />
+              <Stat label="Median Close"        value={fixed(peek.median_close)} />
+              <Stat label="Max Close"           value={fixed(peek.max_close)} />
+              <Stat label="Suggested Threshold" value={fixed(peek.suggested_threshold)} sub="75th percentile"/>
             </div>
+
           </div>
         )}
 
