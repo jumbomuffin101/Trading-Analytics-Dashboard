@@ -1,25 +1,40 @@
 // cloudfare-api/src/index.ts
-// Uses real Yahoo Finance data while preserving prior response shapes.
-// Do NOT change your frontend.
+// Always returns CORS headers; hardened against throw paths.
 
-const ALLOW_ORIGIN = "https://jumbomuffin101.github.io";
+const ALLOW_ORIGIN = "https://jumbomuffin101.github.io"; // domain only
 
-function corsHeaders() {
+function corsHeaders(origin = ALLOW_ORIGIN) {
   return {
-    "access-control-allow-origin": ALLOW_ORIGIN,
+    "access-control-allow-origin": origin,
     "access-control-allow-headers": "content-type",
     "access-control-allow-methods": "POST, OPTIONS, GET",
     "vary": "origin",
   };
 }
-const asJson = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...corsHeaders() } });
-const asText = (msg: string, status = 200) =>
-  new Response(msg, { status, headers: { "content-type": "text/plain; charset=utf-8", ...corsHeaders() } });
+
+function withCors(resp: Response, origin?: string) {
+  const hdrs = new Headers(resp.headers);
+  const ch = corsHeaders(origin);
+  for (const [k, v] of Object.entries(ch)) hdrs.set(k, v);
+  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: hdrs });
+}
+
+function asJson(data: unknown, status = 200, origin?: string) {
+  return withCors(new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  }), origin);
+}
+
+function asText(msg: string, status = 200, origin?: string) {
+  return withCors(new Response(msg, {
+    status,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  }), origin);
+}
 
 type OHLC = { date: string; open: number; high: number; low: number; close: number };
 
-// ---- Yahoo response typing
 type YahooChartResponse = {
   chart?: {
     result?: Array<{
@@ -38,41 +53,39 @@ type YahooChartResponse = {
 };
 
 async function fetchYahooDaily(symbol: string, start?: string, end?: string): Promise<OHLC[]> {
-  let url: string;
-  if (start && end) {
-    const p1 = Math.floor(new Date(`${start}T00:00:00Z`).getTime() / 1000);
-    const p2 = Math.floor(new Date(`${end}T23:59:59Z`).getTime() / 1000);
-    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-      symbol
-    )}?period1=${p1}&period2=${p2}&interval=1d&includePrePost=false&events=div%2Csplit`;
-  } else {
-    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-      symbol
-    )}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
+  try {
+    let url: string;
+    if (start && end) {
+      const p1 = Math.floor(new Date(`${start}T00:00:00Z`).getTime() / 1000);
+      const p2 = Math.floor(new Date(`${end}T23:59:59Z`).getTime() / 1000);
+      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&includePrePost=false&events=div%2Csplit`;
+    } else {
+      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
+    }
+
+    const res = await fetch(url, { headers: { accept: "application/json" } });
+    if (!res.ok) return [];
+    const json = (await res.json()) as YahooChartResponse;
+
+    const result = json.chart?.result?.[0];
+    const ts = result?.timestamp ?? [];
+    const q = result?.indicators?.quote?.[0] ?? {};
+    const o = q.open ?? [], h = q.high ?? [], l = q.low ?? [], c = q.close ?? [];
+
+    const out: OHLC[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const t = ts[i]; if (t == null) continue;
+      const open = Number(o[i]), high = Number(h[i]), low = Number(l[i]), close = Number(c[i]);
+      if (!isFinite(open) || !isFinite(high) || !isFinite(low) || !isFinite(close)) continue;
+      const date = new Date(t * 1000).toISOString().slice(0, 10);
+      out.push({ date, open, high, low, close });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    return out;
+  } catch {
+    // Never throw past here — return empty to be handled gracefully
+    return [];
   }
-
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`Yahoo fetch failed (${res.status})`);
-  const json = (await res.json()) as YahooChartResponse;
-
-  const result = json.chart?.result?.[0];
-  const ts = result?.timestamp ?? [];
-  const q = result?.indicators?.quote?.[0] ?? {};
-  const o = q.open ?? [];
-  const h = q.high ?? [];
-  const l = q.low ?? [];
-  const c = q.close ?? [];
-
-  const out: OHLC[] = [];
-  for (let i = 0; i < ts.length; i++) {
-    const t = ts[i]; if (t == null) continue;
-    const open = Number(o[i]); const high = Number(h[i]); const low = Number(l[i]); const close = Number(c[i]);
-    if (!isFinite(open) || !isFinite(high) || !isFinite(low) || !isFinite(close)) continue;
-    const date = new Date(t * 1000).toISOString().slice(0, 10);
-    out.push({ date, open, high, low, close });
-  }
-  out.sort((a, b) => a.date.localeCompare(b.date));
-  return out;
 }
 
 function median(values: number[]): number {
@@ -82,21 +95,20 @@ function median(values: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-// Keep the same output fields your UI already expects:
 async function handlePeek(body: any) {
   const symbol = (body?.symbol || "SPY").toString().toUpperCase();
   const start = body?.start ? String(body.start) : undefined;
-  const end = body?.end ? String(body.end) : undefined;
+  const end   = body?.end   ? String(body.end)   : undefined;
 
   const preview = await fetchYahooDaily(symbol, start, end);
-  if (!preview.length) throw new Error("No data for symbol/date range");
+  if (!preview.length) {
+    return { detail: "No data for symbol/date range", symbol, preview: [], rows: 0 };
+  }
 
   const closes = preview.map(p => p.close);
   const min_close = Math.min(...closes);
   const max_close = Math.max(...closes);
   const median_close = median(closes);
-
-  // Heuristic but deterministic suggested threshold (tune if your UI expects a different scale)
   const suggested_threshold = +(((median_close - min_close) / (max_close - min_close || 1)) / 10).toFixed(3);
 
   return {
@@ -108,11 +120,10 @@ async function handlePeek(body: any) {
     max_close: +max_close.toFixed(2),
     suggested_threshold,
     rows: preview.length,
-    preview, // array of { date, open, high, low, close }
+    preview,
   };
 }
 
-// Simple threshold strategy; preserves backtest output field names used earlier
 function runThresholdBacktest(data: OHLC[], threshold = 0.005, holdDays = 5, equityStart = 1000) {
   type Trade = { entry_date: string; entry_price: number; exit_date: string; exit_price: number; pnl: number; return_pct: number };
   const trades: Trade[] = [];
@@ -121,17 +132,13 @@ function runThresholdBacktest(data: OHLC[], threshold = 0.005, holdDays = 5, equ
   for (let i = 1; i < data.length - holdDays; i++) {
     const ret = (closes[i] - closes[i - 1]) / closes[i - 1];
     if (ret >= threshold) {
-      const entry = data[i];
-      const exit = data[i + holdDays];
+      const entry = data[i], exit = data[i + holdDays];
       const pnl = +(exit.close - entry.close);
       const return_pct = +(((exit.close - entry.close) / entry.close) * 100);
       trades.push({
-        entry_date: entry.date,
-        entry_price: +entry.close.toFixed(2),
-        exit_date: exit.date,
-        exit_price: +exit.close.toFixed(2),
-        pnl: +pnl.toFixed(2),
-        return_pct: +return_pct.toFixed(2),
+        entry_date: entry.date, entry_price: +entry.close.toFixed(2),
+        exit_date: exit.date,   exit_price: +exit.close.toFixed(2),
+        pnl: +pnl.toFixed(2), return_pct: +return_pct.toFixed(2),
       });
     }
   }
@@ -164,37 +171,67 @@ async function handleBacktest(body: any) {
   const symbol = (body?.symbol || "SPY").toString().toUpperCase();
   const start = body?.start ? String(body.start) : undefined;
   const end   = body?.end   ? String(body.end)   : undefined;
-  const threshold = body?.threshold != null ? Number(body.threshold) : 0.005;   // match your local
+  const threshold = body?.threshold != null ? Number(body.threshold) : 0.005;
   const holdDays  = body?.hold_days != null ? Math.max(1, Number(body.hold_days)) : 5;
 
   const data = await fetchYahooDaily(symbol, start, end);
-  if (!data.length) throw new Error("No data for symbol/date range");
+  if (!data.length) {
+    return {
+      symbol, start: start ?? "", end: end ?? "",
+      trades: [], equity_curve: [{ date: "", equity: 1000 }],
+      equity_start: 1000, equity_end: 1000,
+      best_trade: { entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 },
+      worst_trade:{ entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 },
+      total_trades: 0, win_rate_pct: 0,
+      detail: "No data for symbol/date range",
+    };
+  }
 
   const bt = runThresholdBacktest(data, threshold, holdDays, 1000);
-
-  return {
-    symbol,
-    start: data[0].date,
-    end: data[data.length - 1].date,
-    ...bt,
-  };
+  return { symbol, start: data[0].date, end: data[data.length - 1].date, ...bt };
 }
 
 export default {
   async fetch(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    const path = url.pathname;
+    // Read request Origin once (so we can echo it if you ever want dynamic allowlists)
+    const origin = req.headers.get("Origin") || ALLOW_ORIGIN;
 
-    if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders() });
-    if (req.method === "GET" && (path === "/" || path === "/status")) return asJson({ ok: true, ts: Date.now(), path });
+    try {
+      const url = new URL(req.url);
+      const path = url.pathname;
 
-    if (req.method !== "POST") return asText("POST only", 405);
+      // Preflight
+      if (req.method === "OPTIONS") {
+        return withCors(new Response(null), origin);
+      }
 
-    let body: any = {};
-    try { body = await req.json(); } catch { return asText("Invalid JSON body", 400); }
+      // Health BEFORE POST guard
+      if (req.method === "GET" && (path === "/" || path === "/status")) {
+        return asJson({ ok: true, ts: Date.now(), path }, 200, origin);
+      }
 
-    if (path.endsWith("/peek"))     return asJson(await handlePeek(body));
-    if (path.endsWith("/backtest")) return asJson(await handleBacktest(body));
-    return asText("Unknown route. Use /peek or /backtest.", 404);
+      // Only POST for API routes
+      if (req.method !== "POST") {
+        return asText("POST only", 405, origin);
+      }
+
+      // Parse JSON body
+      let body: any = {};
+      try {
+        body = await req.json();
+      } catch {
+        return asText("Invalid JSON body", 400, origin);
+      }
+
+      // Routes
+      if (path.endsWith("/peek"))     return asJson(await handlePeek(body), 200, origin);
+      if (path.endsWith("/backtest")) return asJson(await handleBacktest(body), 200, origin);
+
+      return asText("Unknown route. Use /peek or /backtest.", 404, origin);
+    } catch (err: any) {
+      // Absolute last-resort catch — ALWAYS include CORS
+      const message = typeof err?.message === "string" ? err.message : "Internal error";
+      return asJson({ detail: message }, 500, req.headers.get("Origin") || ALLOW_ORIGIN);
+    }
   },
 } satisfies ExportedHandler;
