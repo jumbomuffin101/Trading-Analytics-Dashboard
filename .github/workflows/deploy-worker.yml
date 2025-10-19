@@ -1,0 +1,61 @@
+name: Deploy Cloudflare Worker (ssmif-api)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "cloudfare-api/**"
+      - ".github/workflows/deploy-worker.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudfare-api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cloudfare-api/package-lock.json
+
+      - name: Install deps
+        run: npm ci || npm install
+
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudfare-api
+          command: deploy
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Hit /status until healthy (max ~30s)
+        shell: bash
+        env:
+          API: https://ssmif-api.${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.workers.dev
+        run: |
+          # If you changed "name" in wrangler.jsonc, set the URL explicitly:
+          # API=""https://ssmif-api.ryanrawat.workers.dev""
+
+          for i in {1..6}; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/status")
+            echo "Attempt $i -> $CODE"
+            if [ "$CODE" = "200" ]; then
+              echo "Worker healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Worker did not become healthy in time"
+          exit 1

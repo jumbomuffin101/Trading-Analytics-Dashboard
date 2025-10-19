@@ -1,15 +1,6 @@
 {
-  // Give your Worker a unique name (only letters, numbers, hyphens)
-  "name": "ssmif-api",
-
-  // Entry file (TypeScript ok)
+  "name": "ssmif-api",          // must match what you want at workers.dev
   "main": "src/index.ts",
-
-  // Pick today’s date or a recent one
-  "compatibility_date": "2024-11-01",
-
-  // Keep this if you want to run tests; not required for deploy
-  // "tests": { ... }
-
-  // (Optional) If later you add KV/D1/etc., they go here
+  "compatibility_date": "2024-11-01"
+  // (no routes needed if you use workers.dev URL)
 }
