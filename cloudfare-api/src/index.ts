@@ -11,7 +11,7 @@ const json = (data: unknown, status = 200, origin = PAGES_ORIGIN) =>
       "access-control-allow-origin": origin,
       "access-control-allow-headers": "content-type",
       "access-control-allow-methods": "POST, OPTIONS, GET",
-      "vary": "origin",
+      vary: "origin",
     },
   });
 
@@ -23,7 +23,7 @@ const text = (msg: string, status = 200, origin = PAGES_ORIGIN) =>
       "access-control-allow-origin": origin,
       "access-control-allow-headers": "content-type",
       "access-control-allow-methods": "POST, OPTIONS, GET",
-      "vary": "origin",
+      vary: "origin",
     },
   });
 
@@ -55,101 +55,122 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
-function yahooUrl(symbol: string, start?: string, end?: string): string {
+// ---------------------------------------------------------------------------------------
+// Robust candle fetchers (Stooq first for reliability, then Yahoo with UA + query2 mirror)
+// ---------------------------------------------------------------------------------------
+
+async function fetchStooqCsv(host: "stooq.com" | "stooq.pl", symbolLower: string): Promise<string> {
+  const url = `https://${host}/q/d/l/?s=${encodeURIComponent(symbolLower)}&i=d`;
+  const r = await fetch(url, { headers: { accept: "text/csv" } });
+  if (!r.ok) return "";
+  return await r.text();
+}
+
+function parseStooqCsv(csv: string): OHLC[] {
+  if (!csv) return [];
+  const lines = csv.trim().split(/\r?\n/);
+  if (!/^Date,Open,High,Low,Close/i.test(lines[0] ?? "")) return [];
+  const rows = lines.slice(1).map((l) => l.split(","));
+  const out: OHLC[] = [];
+  for (const cols of rows) {
+    const [date, o, h, l, c] = cols;
+    const open = Number(o),
+      high = Number(h),
+      low = Number(l),
+      close = Number(c);
+    if (![open, high, low, close].every(Number.isFinite)) continue;
+    out.push({ date, open, high, low, close });
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
+}
+
+// Try Stooq with .us then plain, on both .com and .pl
+async function tryStooqAll(symbol: string, start?: string, end?: string): Promise<{ data: OHLC[]; source?: string }> {
+  const variants = [
+    { host: "stooq.com" as const, sym: `${symbol.toLowerCase()}.us` },
+    { host: "stooq.com" as const, sym: symbol.toLowerCase() },
+    { host: "stooq.pl" as const, sym: `${symbol.toLowerCase()}.us` },
+    { host: "stooq.pl" as const, sym: symbol.toLowerCase() },
+  ];
+  for (const v of variants) {
+    try {
+      const csv = await fetchStooqCsv(v.host, v.sym);
+      let data = parseStooqCsv(csv);
+      if (start) data = data.filter((d) => d.date >= start);
+      if (end) data = data.filter((d) => d.date <= end);
+      if (data.length) return { data, source: `stooq:${v.host}/${v.sym}` };
+    } catch {
+      // continue
+    }
+  }
+  return { data: [] };
+}
+
+function buildYahooUrl(symbol: string, start?: string, end?: string, host = "query1.finance.yahoo.com") {
   if (start && end) {
     const p1 = Math.floor(new Date(`${start}T00:00:00Z`).getTime() / 1000);
     const p2 = Math.floor(new Date(`${end}T23:59:59Z`).getTime() / 1000);
-    return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&includePrePost=false&events=div%2Csplit`;
+    return `https://${host}/v8/finance/chart/${encodeURIComponent(
+      symbol
+    )}?period1=${p1}&period2=${p2}&interval=1d&includePrePost=false&events=div%2Csplit`;
   }
-  return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
+  return `https://${host}/v8/finance/chart/${encodeURIComponent(
+    symbol
+  )}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
 }
 
-
-async function fetchYahooDaily(symbol: string, start?: string, end?: string): Promise<OHLC[]> {
-  try {
-    let url: string;
-    if (start && end) {
-      const p1 = Math.floor(new Date(`${start}T00:00:00Z`).getTime() / 1000);
-      const p2 = Math.floor(new Date(`${end}T23:59:59Z`).getTime() / 1000);
-      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-        symbol
-      )}?period1=${p1}&period2=${p2}&interval=1d&includePrePost=false&events=div%2Csplit`;
-    } else {
-      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-        symbol
-      )}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
-    }
-    const r = await fetch(url, { headers: { accept: "application/json" } });
-    if (!r.ok) return [];
-    const data = (await r.json()) as YahooChartResponse;
-    const res = data.chart?.result?.[0];
-    const ts = res?.timestamp ?? [];
-    const q = res?.indicators?.quote?.[0] ?? {};
-    const o = q.open ?? [];
-    const h = q.high ?? [];
-    const l = q.low ?? [];
-    const c = q.close ?? [];
-
-    const out: OHLC[] = [];
-    for (let i = 0; i < ts.length; i++) {
-      const t = ts[i];
-      if (t == null) continue;
-      const open = Number(o[i]),
-        high = Number(h[i]),
-        low = Number(l[i]),
-        close = Number(c[i]);
-      if (![open, high, low, close].every(Number.isFinite)) continue;
-      const date = new Date(t * 1000).toISOString().slice(0, 10);
-      out.push({ date, open, high, low, close });
-    }
-    out.sort((a, b) => a.date.localeCompare(b.date));
-    return out;
-  } catch {
-    return [];
+async function tryYahoo(symbol: string, start?: string, end?: string, host = "query1.finance.yahoo.com") {
+  const url = buildYahooUrl(symbol, start, end, host);
+  const headers = {
+    accept: "application/json",
+    // Use browser-like UA to avoid generic-bot blocking
+    "user-agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  };
+  const r = await fetch(url, { headers });
+  if (!r.ok) return { data: [] as OHLC[] };
+  const j = (await r.json()) as YahooChartResponse;
+  const res = j?.chart?.result?.[0];
+  const ts: number[] = res?.timestamp ?? [];
+  const q = res?.indicators?.quote?.[0] ?? {};
+  const opens = q?.open ?? [];
+  const highs = q?.high ?? [];
+  const lows = q?.low ?? [];
+  const closes = q?.close ?? [];
+  const out: OHLC[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const t = ts[i];
+    const o = Number(opens[i]),
+      h = Number(highs[i]),
+      l = Number(lows[i]),
+      c = Number(closes[i]);
+    if (!Number.isFinite(t) || ![o, h, l, c].every(Number.isFinite)) continue;
+    out.push({
+      date: new Date(t * 1000).toISOString().slice(0, 10),
+      open: o,
+      high: h,
+      low: l,
+      close: c,
+    });
   }
-}
-// TEMP: debug what Yahoo returns from the Worker environment
-async function handleYahooTest(body: any) {
-  const symbol = (body?.symbol || "SPY").toString().toUpperCase();
-  const start = body?.start ? String(body.start) : undefined;
-  const end   = body?.end   ? String(body.end)   : undefined;
-
-  const url = yahooUrl(symbol, start, end);
-
-  // Try 1: current behavior (no UA)
-  const r1 = await fetch(url, { headers: { accept: "application/json" } });
-  const t1 = await r1.text();
-
-  // Try 2: with a browser-like User-Agent (some endpoints block generic bots)
-  const r2 = await fetch(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    },
-  });
-  const t2 = await r2.text();
-
-  return new Response(JSON.stringify({
-    symbol, start, end, url,
-    try1: { ok: r1.ok, status: r1.status, len: t1.length, head: t1.slice(0, 400) },
-    try2: { ok: r2.ok, status: r2.status, len: t2.length, head: t2.slice(0, 400) },
-  }), {
-    status: 200,
-    headers: {
-      "content-type": "application/json",
-      "access-control-allow-origin": reqOrigin(body) // helper shown below
-    }
-  });
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return { data: out, source: `yahoo:${host}` };
 }
 
-// small helper to reuse Origin for CORS in debug reply
-function reqOrigin(bodyOrReq: any): string {
-  // when called from fetch(req), we’ll pass req.headers to this helper if needed;
-  // for now we just return your Pages origin:
-  return "https://jumbomuffin101.github.io";
-}
+async function fetchCandles(symbol: string, start?: string, end?: string): Promise<{ data: OHLC[]; source?: string }> {
+  // 1) Stooq (most likely to succeed in serverless)
+  let r = await tryStooqAll(symbol, start, end);
+  if (r.data.length) return r;
 
+  // 2) Yahoo primary
+  r = await tryYahoo(symbol, start, end, "query1.finance.yahoo.com");
+  if (r.data.length) return r;
+
+  // 3) Yahoo mirror
+  r = await tryYahoo(symbol, start, end, "query2.finance.yahoo.com");
+  return r;
+}
 
 /* ------------------------------- /peek -------------------------------- */
 
@@ -158,7 +179,8 @@ async function handlePeek(body: any) {
   const start = body?.start ? String(body.start) : undefined;
   const end = body?.end ? String(body.end) : undefined;
 
-  const preview = await fetchYahooDaily(symbol, start, end);
+  const { data: preview, source: source_used } = await fetchCandles(symbol, start, end);
+
   if (!preview.length) {
     return {
       symbol,
@@ -171,6 +193,7 @@ async function handlePeek(body: any) {
       rows: 0,
       preview: [] as OHLC[],
       note: "No data for symbol/date range",
+      source_used: source_used ?? "none",
     };
   }
 
@@ -178,8 +201,8 @@ async function handlePeek(body: any) {
   const min_close = clampNum(Math.min(...closes));
   const max_close = clampNum(Math.max(...closes));
   const median_close = clampNum(median(closes));
-  // heuristic: 75th-percentile-ish distance scaled to a usable absolute price step
-  const suggested_threshold = +(((median_close - min_close) / (max_close - min_close || 1)) * max_close * 0.05).toFixed(2);
+  // Simple suggested threshold between median and max
+  const suggested_threshold = clampNum(median_close + (max_close - median_close) * 0.25, 2);
 
   return {
     symbol,
@@ -188,9 +211,10 @@ async function handlePeek(body: any) {
     min_close,
     median_close,
     max_close,
-    suggested_threshold, // number
+    suggested_threshold,
     rows: preview.length,
     preview, // [{date,open,high,low,close}]
+    source_used,
   };
 }
 
@@ -290,7 +314,7 @@ async function handleBacktest(body: any) {
   const threshold = Number(body?.threshold);
   const hold_days = Math.max(1, Number(body?.hold_days ?? 4));
 
-  const data = await fetchYahooDaily(symbol, start, end);
+  const { data, source: source_used } = await fetchCandles(symbol, start, end);
 
   if (!data.length || !isFinite(threshold)) {
     return {
@@ -312,6 +336,7 @@ async function handleBacktest(body: any) {
       note: !isFinite(threshold)
         ? "Invalid threshold"
         : "No data for symbol/date range",
+      source_used: source_used ?? "none",
     };
   }
 
@@ -327,10 +352,16 @@ async function handleBacktest(body: any) {
     equity_curve: bt.equity_curve,
     // optional price series for your price chart
     price_series: data.map((d) => ({ date: d.date, close: clampNum(d.close) })),
+    source_used,
   };
 }
 
 /* ------------------------------- Worker ------------------------------- */
+
+const BUILD = "v-fallback-stooq-yahoo-1"; // change this string each deploy to verify
+function about(origin: string) {
+  return json({ ok: true, build: BUILD, service: "ssmif-api" }, 200, origin);
+}
 
 export default {
   async fetch(req: Request): Promise<Response> {
@@ -340,6 +371,7 @@ export default {
       const path = url.pathname;
 
       if (req.method === "OPTIONS") return text("", 200, origin);
+      if (req.method === "GET" && path === "/about") return about(origin); // <-- added
       if (req.method === "GET" && (path === "/" || path === "/status"))
         return json({ ok: true, path }, 200, origin);
       if (req.method !== "POST") return text("POST only", 405, origin);
