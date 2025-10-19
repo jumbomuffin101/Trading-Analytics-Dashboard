@@ -43,19 +43,18 @@ jobs:
       - name: Hit /status until healthy (max ~30s)
         shell: bash
         env:
-          API: https://ssmif-api.${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.workers.dev
+          API: "https://ssmif-api.ryanrawat.workers.dev"  # <-- use your real Worker URL
         run: |
-          # If you changed "name" in wrangler.jsonc, set the URL explicitly:
-          # API=""https://ssmif-api.ryanrawat.workers.dev""
-
-          for i in {1..6}; do
+          for i in {1..10}; do
             CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/status")
             echo "Attempt $i -> $CODE"
             if [ "$CODE" = "200" ]; then
-              echo "Worker healthy"
+              echo "Worker healthy at $API"
               exit 0
             fi
-            sleep 5
+            sleep 3
           done
           echo "Worker did not become healthy in time"
+          echo "----- Last response -----"
+          curl -i "$API/status" || true
           exit 1
