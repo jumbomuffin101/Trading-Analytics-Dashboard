@@ -1,21 +1,22 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useMemo, useState, useEffect } from "react";
 import axios from "axios";
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  LineChart, Line, ReferenceLine, ReferenceDot, Label
+} from "recharts";
+import "./index.css";
 
-// ===== 1) Axios client that points to your Worker in production =====
-//   * VITE_API_BASE comes from your GitHub Secret (or .env.production)
-//   * Fallback to "/api" lets local dev work if you proxy
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || "/api",
-  timeout: 20000,
+  timeout: 25000,
 });
-
-// ===== 2) Types (match what the Worker returns in our last message) =====
-type OHLC = { date: string; open: number; high: number; low: number; close: number };
 
 type PeekResponse = {
   symbol: string; start: string; end: string;
   min_close: number; median_close: number; max_close: number;
-  suggested_threshold: number; rows: number; preview: OHLC[];
+  suggested_threshold: number; rows: number;
+  preview: { date: string; open: number; high: number; low: number; close: number }[];
+  note?: string;
 };
 
 type Trade = {
@@ -26,164 +27,411 @@ type Trade = {
 
 type BacktestResponse = {
   symbol: string; start: string; end: string;
-  equity_start: number; equity_end: number;
-  equity_curve: { date: string; equity: number }[];
+  params: { threshold: number; hold_days: number };
+  metrics: {
+    total_pnl: number; win_rate: number; annualized_return: number;
+    max_drawdown: number; final_equity: number; initial_equity: number
+  };
   trades: Trade[];
-  best_trade: Trade; worst_trade: Trade;
-  total_trades: number; win_rate_pct: number;
+  equity_curve: { date: string; equity: number }[];
+  price_series?: { date: string; close: number }[];
+  note?: string;
 };
 
-// ===== 3) Small helpers to avoid "Cannot read properties of undefined (toFixed)" =====
-const fmt = (x: unknown, d = 2) => {
-  const n = typeof x === "number" && isFinite(x) ? x : 0;
-  return n.toFixed(d);
+const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
+const fmtDate = (iso: string) => new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric"}).format(new Date(iso));
+const fmtMoney  = (v:number) => Number.isFinite(v) ? "$" + Math.round(v).toLocaleString() : "";
+const fmtMoney2 = (v:number) => Number.isFinite(v) ? "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+const fmtPct1   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(1) + "%" : "";
+const fmtPct2   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(2) + "%" : "";
+const fmtSignedMoney2 = (v:number) => {
+  if (!Number.isFinite(v)) return "";
+  const sign = v >= 0 ? "+" : "−";
+  return sign + Math.abs(v).toLocaleString(undefined, { style:"currency", currency:"USD", minimumFractionDigits:2, maximumFractionDigits:2 });
 };
-const safe = <T,>(v: T | undefined | null, fallback: T) => (v ?? fallback);
+
+type ChartMode = "equity" | "price";
+type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
+
+function Stat({ label, value, sub }: { label:string; value:string; sub?:string }) {
+  return (
+    <div className="p-5 rounded-xl bg-slate-900/40 border border-slate-800">
+      <div className="text-sm text-slate-400">{label}</div>
+      <div className="text-2xl font-semibold tabular-nums whitespace-nowrap leading-snug">{value}</div>
+      {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+function Kpi({
+  label, value, sub, tone
+}: { label: string; value: string; sub?: string; tone?: "bull" | "bear" | "muted" }) {
+  const toneClass =
+    tone === "bull" ? "text-emerald-300" :
+    tone === "bear" ? "text-rose-300" :
+    "text-slate-200";
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 w-[180px] text-center">
+      <div className="text-[11px] text-slate-400 whitespace-nowrap">{label}</div>
+      <div className={`text-lg font-semibold tabular-nums ${toneClass} whitespace-nowrap`}>{value}</div>
+      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>}
+    </div>
+  );
+}
 
 export default function App() {
-  const [symbol, setSymbol] = useState<string>(""); // start with none selected
-  const [peek, setPeek] = useState<PeekResponse | null>(null);
-  const [backtest, setBacktest] = useState<BacktestResponse | null>(null);
+  const today = new Date();
+  const yday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const ydayISO = yday.toISOString().slice(0,10);
+  const startDefault = new Date(yday); startDefault.setDate(yday.getDate()-120);
+  const startISO = startDefault.toISOString().slice(0,10);
 
-  const [loadingPeek, setLoadingPeek] = useState(false);
-  const [loadingBt, setLoadingBt] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [symbol, setSymbol] = useState("SPY");
+  const [start, setStart]   = useState(startISO);
+  const [end, setEnd]       = useState(ydayISO);
+  const [threshold, setThreshold] = useState<string>("");
+  const [holdDays, setHoldDays]   = useState<string>("4");
 
-  // Debug: confirm what URL your build embedded
+  const [peek, setPeek]     = useState<PeekResponse | null>(null);
+  const [result, setResult] = useState<BacktestResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [peekBusy, setPeekBusy] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const [mode, setMode]       = useState<ChartMode>("equity");
+
+  const [sortKey, setSortKey] = useState<SortKey>("entry_date");
+  const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
+
   useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log("VITE_API_BASE =", import.meta.env.VITE_API_BASE);
+    try {
+      const raw = localStorage.getItem("ssmif-settings");
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.symbol) setSymbol(String(s.symbol));
+      if (s.start)  setStart(String(s.start));
+      if (s.end)    setEnd(String(s.end));
+      if (s.threshold !== undefined) setThreshold(String(s.threshold));
+      if (s.holdDays  !== undefined) setHoldDays(String(s.holdDays));
+    } catch {}
   }, []);
 
-  // ===== 4) Button handlers (the important part) =====
-  const handlePeek = async () => {
-    try {
-      setErr(null);
-      setLoadingPeek(true);
-      setBacktest(null);
+  useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
 
-      // you can include additional options here (start/end/threshold) if your UI collects them
-      const body = { symbol: symbol || "SPY" };
-      const { data } = await api.post<PeekResponse>("/peek", body);
-
-      // Guard for numbers so UI never crashes
-      const fixed: PeekResponse = {
-        ...data,
-        min_close: Number(data.min_close ?? 0),
-        median_close: Number(data.median_close ?? 0),
-        max_close: Number(data.max_close ?? 0),
-        suggested_threshold: Number(data.suggested_threshold ?? 0),
-        rows: Number(data.rows ?? (data.preview?.length ?? 0)),
-        preview: Array.isArray(data.preview) ? data.preview : [],
-      };
-      setPeek(fixed);
-    } catch (e: any) {
-      console.error(e);
-      setErr(e?.message || "Peek failed");
-    } finally {
-      setLoadingPeek(false);
-    }
+  const parseThreshold = (): number | null => {
+    if (threshold.trim() === "") return null;
+    const v = Number(threshold);
+    return Number.isFinite(v) ? v : null;
+  };
+  const parseHoldDays = (): number | null => {
+    if (holdDays.trim() === "") return null;
+    const n = Number(holdDays);
+    return Number.isInteger(n) && n >= 1 ? n : null;
   };
 
-  const handleBacktest = async () => {
+  const doPeek = async () => {
+    setError(null); setResult(null);
+    setPeekBusy(true); setLoading(true);
     try {
-      setErr(null);
-      setLoadingBt(true);
-
-      // If your local code used threshold/dates, include them here from state/inputs.
-      const body = { symbol: symbol || "SPY" };
-      const { data } = await api.post<BacktestResponse>("/backtest", body);
-
-      // Normalize numbers & arrays
-      const fixed: BacktestResponse = {
-        ...data,
-        equity_start: Number(data.equity_start ?? 1000),
-        equity_end: Number(data.equity_end ?? 1000),
-        equity_curve: Array.isArray(data.equity_curve) ? data.equity_curve : [],
-        trades: Array.isArray(data.trades) ? data.trades : [],
-        best_trade: data.best_trade ?? { entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 },
-        worst_trade: data.worst_trade ?? { entry_date: "", entry_price: 0, exit_date: "", exit_price: 0, pnl: 0, return_pct: 0 },
-        total_trades: Number(data.total_trades ?? (data.trades?.length ?? 0)),
-        win_rate_pct: Number(data.win_rate_pct ?? 0),
-      };
-      setBacktest(fixed);
-    } catch (e: any) {
-      console.error(e);
-      setErr(e?.message || "Backtest failed");
-    } finally {
-      setLoadingBt(false);
-    }
+      const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
+      setPeek(res.data);
+      setThreshold(res.data.suggested_threshold.toFixed(2));
+    } catch (e:any) {
+      setError(e?.response?.data?.detail ?? e.message);
+      setPeek(null);
+    } finally { setPeekBusy(false); setLoading(false); }
   };
 
-  // ===== 5) Render (minimal example; keep your existing layout/charts) =====
+  const doBacktest = async () => {
+    setError(null); setLoading(true); setResult(null);
+    try {
+      const thr = parseThreshold();
+      const hd  = parseHoldDays();
+      if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
+      if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
+      const res = await api.post<BacktestResponse>("/backtest", {symbol, start, end, threshold: thr, hold_days: hd});
+      setResult(res.data);
+    } catch (e:any) {
+      setError(e?.response?.data?.detail ?? e.message);
+    } finally { setLoading(false); }
+  };
+
+  const dateIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    (result?.price_series ?? []).forEach((r, i) => m.set(r.date, i));
+    return m;
+  }, [result]);
+
+  const tradesWithBars = useMemo(() => {
+    const t = (result?.trades ?? []).map(tr => {
+      const iE = dateIndex.get(tr.entry_date);
+      const iX = dateIndex.get(tr.exit_date);
+      const bars = (iE !== undefined && iX !== undefined) ? Math.max(0, iX - iE) : NaN;
+      return { ...tr, daysBars: bars };
+    });
+    const dir = (sortDir === "asc") ? 1 : -1;
+    const sorted = [...t].sort((a:any,b:any) => {
+      if (sortKey === "entry_date" || sortKey === "exit_date") {
+        return (a[sortKey] < b[sortKey] ? -1 : a[sortKey] > b[sortKey] ? 1 : 0) * dir;
+      }
+      return ((a as any)[sortKey] - (b as any)[sortKey]) * dir;
+    });
+    return sorted;
+  }, [result, sortKey, sortDir, dateIndex]);
+
+  const kpis = useMemo(() => {
+    const t = tradesWithBars;
+    const count = t.length;
+    const totalPnL = t.reduce((s,x)=>s+x.pnl,0);
+    const wins     = t.filter(x => x.pnl > 0);
+    const losses   = t.filter(x => x.pnl <= 0);
+    const winRate  = count ? wins.length / count : 0;
+    const best     = count ? Math.max(...t.map(x=>x.pnl)) : 0;
+    const worst    = count ? Math.min(...t.map(x=>x.pnl)) : 0;
+    return { count, totalPnL, winRate, best, worst };
+  }, [tradesWithBars]);
+
+  const avgTradeReturn = useMemo(() => {
+    const t = result?.trades ?? [];
+    if (!t.length) return 0;
+    return t.reduce((s,x)=>s+x.return_pct,0) / t.length;
+  }, [result]);
+
+  const xTickFormatter = (iso: string) => {
+    const d = new Date(iso);
+    return new Intl.DateTimeFormat("en-US",{year:"numeric", month:"2-digit"}).format(d);
+  };
+
+  const thrInvalid = threshold.trim() !== "" && parseThreshold() === null;
+  const hdInvalid  = holdDays.trim() !== "" && parseHoldDays() === null;
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+  const sortIndicator = (key: SortKey) => (sortKey !== key ? "" : (sortDir === "asc" ? "^" : "v"));
+
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
-      <h1>SSMIF Quant</h1>
-
-      {/* Symbol picker (keep whatever you had locally; starting empty matches your earlier request) */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-        <label>Symbol:</label>
-        <input
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-          placeholder="e.g. SPY"
-          style={{ width: 120, padding: 6 }}
-        />
-        <button onClick={handlePeek} disabled={loadingPeek}>
-          {loadingPeek ? "Peeking..." : "Peek"}
-        </button>
-        <button onClick={handleBacktest} disabled={loadingBt}>
-          {loadingBt ? "Running..." : "Run Backtest"}
-        </button>
+    <div className="min-h-screen">
+      {/* Header */}
+      <div className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-black" />
+        <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
+          <div className="flex items-center gap-3">
+            <div className="h-11 w-11 rounded-xl bg-bull-600 flex items-center justify-center font-black">$</div>
+            <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
+          </div>
+        </div>
       </div>
 
-      {err && (
-        <div style={{ color: "crimson", marginBottom: 8 }}>
-          Error: {err}
-        </div>
-      )}
+      {/* Body */}
+      <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
 
-      {/* Peek snapshot */}
-      {peek && (
-        <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, marginBottom: 12 }}>
-          <h3>Market Snapshot ({peek.symbol})</h3>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <div>Start: {peek.start}</div>
-            <div>End: {peek.end}</div>
-            <div>Rows: {peek.rows}</div>
-            <div>Min: {fmt(peek.min_close)}</div>
-            <div>Median: {fmt(peek.median_close)}</div>
-            <div>Max: {fmt(peek.max_close)}</div>
-            <div>Suggested threshold: {fmt(peek.suggested_threshold)}</div>
-          </div>
-        </div>
-      )}
+        {/* Peek & symbols */}
+        <div className="card p-6 sm:p-7">
+          <h3 className="text-2xl font-bold tracking-tight text-bull-400">Peek &amp; Symbols</h3>
+          <div className="text-xs text-slate-400 mt-1 mb-3">All symbols work — these are just popular ones.</div>
 
-      {/* Backtest summary */}
-      {backtest && (
-        <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-          <h3>Backtest ({backtest.symbol})</h3>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 8 }}>
-            <div>Start: {backtest.start}</div>
-            <div>End: {backtest.end}</div>
-            <div>Equity start: {fmt(backtest.equity_start)}</div>
-            <div>Equity end: {fmt(backtest.equity_end)}</div>
-            <div>Total trades: {backtest.total_trades}</div>
-            <div>Win rate: {fmt(backtest.win_rate_pct)}%</div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {PRESETS.map(sym => (
+              <button key={sym} className={"chip " + (symbol === sym ? "active" : "")} onClick={()=>setSymbol(sym)} type="button">
+                {sym}
+              </button>
+            ))}
           </div>
 
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <div>
-              <strong>Best trade</strong><br />
-              {fmt(backtest.best_trade?.return_pct)}%
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <label className="text-sm">
+              <div className="mb-1 text-slate-300">Symbol</div>
+              <input className="input" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} list="symbols" placeholder="e.g. AAPL"/>
+              <datalist id="symbols">{PRESETS.map(s => <option key={s} value={s} />)}</datalist>
+            </label>
+            <label className="text-sm"><div className="mb-1 text-slate-300">Start</div><input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} max={ydayISO}/></label>
+            <label className="text-sm"><div className="mb-1 text-slate-300">End</div><input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} max={ydayISO}/></label>
+          </div>
+
+          <div className="flex flex-wrap gap-3 mt-4">
+            <button className="btn-primary" onClick={doPeek} disabled={loading || peekBusy}>
+              {peekBusy ? "Peeking…" : "Peek"}
+            </button>
+            {error && <span className="text-bear-400">Error: {error}</span>}
+          </div>
+        </div>
+
+        {/* Peek snapshot */}
+        {peek && (
+          <div className="card p-8 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold tracking-tight text-bull-400">{peek.symbol} Market Snapshot</h3>
+                <div className="text-sm text-slate-400">{fmtDate(peek.start)} – {fmtDate(peek.end)}</div>
+              </div>
+              <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
             </div>
-            <div>
-              <strong>Worst trade</strong><br />
-              {fmt(backtest.worst_trade?.return_pct)}%
+            <div className="grid sm:grid-cols-4 gap-4">
+              <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
+              <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
+              <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
+              <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile"/>
+            </div>
+          </div>
+        )}
+
+        {/* Strategy Parameters (condensed) */}
+        <div className="card p-6 sm:p-7">
+          <h3 className="text-2xl font-bold tracking-tight text-bull-400 mb-3">Strategy Parameters</h3>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
+              <label className="text-sm">
+                <div className="mb-1 text-slate-300">Threshold</div>
+                <input className={"input " + (thrInvalid ? "ring-2 ring-bear-500" : "")} inputMode="decimal" step="any" value={threshold} onChange={e=>setThreshold(e.target.value)} placeholder="e.g. 185.75"/>
+              </label>
+              <label className="text-sm">
+                <div className="mb-1 text-slate-300">Hold Days</div>
+                <input className={"input " + (hdInvalid ? "ring-2 ring-bear-500" : "")} inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={e=>setHoldDays(e.target.value)} placeholder=">= 1"/>
+              </label>
+              <div className="sm:col-span-2">
+                <button className="btn-primary" onClick={doBacktest} disabled={loading}>Run Backtest</button>
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-[13px] leading-6">
+              <div className="font-semibold text-slate-200 mb-1">How this strategy works</div>
+              <ul className="list-disc ml-5 text-slate-300 space-y-1">
+                <li><span className="font-medium">Threshold</span>: go long when the close crosses <strong>above</strong> this price.</li>
+                <li><span className="font-medium">Hold Days</span>: hold for N trading days; exit at that day’s close.</li>
+                <li>One position at a time; P&amp;L realized on exits and added to cash-only equity.</li>
+              </ul>
             </div>
           </div>
         </div>
-      )}
+
+        {/* Backtest Results */}
+        {result && (
+          <div className="grid lg:grid-cols-3 gap-8 items-stretch">
+            <div className="card p-6 lg:col-span-2 flex flex-col">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-2xl font-bold tracking-tight text-bull-400">Backtest Results</h3>
+                <div className="flex items-center gap-2 text-sm text-slate-400">
+                  {fmtDate(result.start)} – {fmtDate(result.end)} • {result.symbol}
+                  <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
+                    <button className={"px-3 py-1 rounded-md " + (mode==="equity" ? "bg-bull-600 text-white" : "text-slate-200")} onClick={()=>setMode("equity")}>Equity</button>
+                    <button className={"px-3 py-1 rounded-md " + (mode==="price" ? "bg-bull-600 text-white" : "text-slate-200")} onClick={()=>setMode("price")}>Price</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="w-full h-[380px] mt-2">
+                <ResponsiveContainer>
+                  {mode === "equity" ? (
+                    <AreaChart data={result.equity_curve} margin={{ left: 68, right: 16, top: 10, bottom: 38 }}>
+                      <defs>
+                        <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.32}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0.03}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false}/>
+                      <XAxis dataKey="date" tickMargin={12} tickFormatter={(d)=>new Intl.DateTimeFormat("en-US",{year:"numeric",month:"2-digit"}).format(new Date(d))} stroke="#94a3b8">
+                        <Label value="Date" position="bottom" offset={24} fill="#94a3b8" />
+                      </XAxis>
+                      <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
+                        <Label value="Equity ($)" angle={-90} position="insideLeft" offset={14} dx={-60} dy={30} fill="#94a3b8" />
+                      </YAxis>
+                      <Tooltip contentStyle={{ background:"#0f172a", border:"1px solid #1f2937", borderRadius:12 }} formatter={(value:any) => [fmtMoney2(value as number), "Equity"]}/>
+                      <Area type="monotone" dataKey="equity" stroke="#10b981" fill="url(#eqFill)" strokeWidth={2} />
+                    </AreaChart>
+                  ) : (
+                    <LineChart data={result.price_series ?? []} margin={{ left: 72, right: 16, top: 10, bottom: 38 }}>
+                      <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false}/>
+                      <XAxis dataKey="date" tickMargin={12} tickFormatter={xTickFormatter} stroke="#94a3b8">
+                        <Label value="Date" position="bottom" offset={24} fill="#94a3b8" />
+                      </XAxis>
+                      <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
+                        <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-20} fill="#94a3b8" />
+                      </YAxis>
+                      <Tooltip contentStyle={{ background:"#0f172a", border:"1px solid #1f2937", borderRadius:12 }} formatter={(value:any) => [fmtMoney2(value as number), "Close"]}/>
+                      <Line type="monotone" dataKey="close" stroke="#60a5fa" dot={false} strokeWidth={2}/>
+                      <ReferenceLine y={Number(result?.params?.threshold ?? threshold) || undefined} stroke="#f59e0b" strokeDasharray="4 4" />
+                      {(result.trades ?? []).map((t, i) => (
+                        <g key={i}>
+                          <ReferenceDot x={t.entry_date} y={t.entry_price} r={4} fill="#10b981" stroke="#064e3b" />
+                          <ReferenceDot x={t.exit_date}  y={t.exit_price}  r={4} fill="#ef4444" stroke="#7f1d1d" />
+                        </g>
+                      ))}
+                    </LineChart>
+                  )}
+                </ResponsiveContainer>
+              </div>
+
+              <div className="grid sm:grid-cols-4 gap-4 mt-5">
+                <Stat label="Profit & Loss (USD)" value={fmtSignedMoney2(result.metrics.total_pnl)} />
+                <Stat label="Win Rate" value={fmtPct1(result.metrics.win_rate)} />
+                <Stat label="Annualized Return" value={fmtPct2(result.metrics.annualized_return)} />
+                <Stat label="Trades" value={String((result.trades ?? []).length)} />
+              </div>
+              <div className="grid sm:grid-cols-4 gap-4 mt-4">
+                <Stat label="Final Equity" value={fmtMoney2(result.metrics.final_equity)} />
+                <Stat label="Max Drawdown" value={fmtPct2(result.metrics.max_drawdown)} />
+                <Stat label="Average Trade Return" value={fmtPct2(avgTradeReturn)} />
+                <Stat label="Initial Equity" value={fmtMoney2(result.metrics.initial_equity)} />
+              </div>
+
+              {/* End the card right under this note (no extra spacing block below) */}
+              <div className="mt-3 text-xs text-slate-400 italic">
+                Equity starts at {fmtMoney2(result.metrics.initial_equity)} and steps up/down only on exit days (one position at a time).
+              </div>
+            </div>
+
+            {/* Trades panel */}
+            <div className="flex flex-col h-full min-h-0">
+              <div className="card p-6 flex-1 min-h-0 overflow-auto">
+                <div className="flex items-center justify-center mb-4">
+                  <h3 className="text-2xl font-bold tracking-tight text-bull-400">Trades ({tradesWithBars.length})</h3>
+                </div>
+
+                {/* centered KPI row */}
+                <div className="flex flex-wrap justify-center gap-3 mb-5">
+                  <Kpi label="Best Trade"  value={fmtSignedMoney2(kpis.best)}  tone={kpis.best>=0 ? "bull" : "bear"} sub="USD" />
+                  <Kpi label="Worst Trade" value={fmtSignedMoney2(kpis.worst)} tone={kpis.worst>=0 ? "bull" : "bear"} sub="USD" />
+                  <Kpi label="Hold Period" value={(result?.params?.hold_days ?? Number(holdDays)).toString() + " days"} tone="muted" />
+                </div>
+
+                {/* Vertical per-trade columns */}
+                <div className="overflow-x-auto">
+                  <div className="grid auto-cols-[210px] grid-flow-col gap-4">
+                    {tradesWithBars.map((t, i) => {
+                      const positive = t.pnl >= 0;
+                      return (
+                        <div key={i} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                          <div className="text-sm font-semibold text-slate-200 mb-2">{t.entry_date}</div>
+                          <div className="text-sm text-slate-300 space-y-1">
+                            <div className="flex justify-between"><span>Entry Px</span><span className="tabular-nums">{t.entry_price.toFixed(2)}</span></div>
+                            <div className="flex justify-between"><span>Exit Px</span><span className="tabular-nums">{t.exit_price.toFixed(2)}</span></div>
+                            <div className={"flex justify-between " + (positive ? "text-emerald-300" : "text-rose-300")}>
+                              <span>PnL</span><span className="tabular-nums">{(positive?"+":"") + t.pnl.toFixed(2)}</span>
+                            </div>
+                            <div className={"flex justify-between " + (positive ? "text-emerald-300" : "text-rose-300")}>
+                              <span>Return</span><span className="tabular-nums">{(positive?"+":"") + (t.return_pct*100).toFixed(2)}%</span>
+                            </div>
+                            <div className="flex justify-between"><span>Bars</span><span className="tabular-nums">{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</span></div>
+                            <div className="flex justify-end">
+                              <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-emerald-900/40 text-emerald-300" : "bg-rose-900/40 text-rose-300")}>
+                                {positive ? "Win" : "Loss"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="text-center text-xs text-slate-500">Created by <span className="font-semibold">Aryan Rawat</span></div>
+      </div>
     </div>
   );
 }
