@@ -621,8 +621,6 @@ function Th({ children, onClick }: { children: any; onClick?: () => void }) {
   return <th className="cursor-pointer" onClick={onClick}>{children}</th>;
 }
 
-/* ========== Optimizer Panel (smaller fonts + extra suggestion) ========== */
-/* ========== Optimizer Panel (bigger tiles, smaller suggestions) ========== */
 /* ========== Optimizer Panel (vertical wide/short tiles) ========== */
 function OptimizerPanel({
   result,
@@ -646,12 +644,17 @@ function OptimizerPanel({
   const hitRate = trades.length ? wins.length / trades.length : 0;
   const expectancy = avgWin * hitRate - avgLossAbs * (1 - hitRate);
 
-  const bars = trades.map((t) => t.daysBars).filter((b) => Number.isFinite(b)) as number[];
+  const bars = trades
+    .map((t) => t.daysBars)
+    .filter((b) => Number.isFinite(b)) as number[];
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
-  const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
+  const medBars = bars.length
+    ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)]
+    : 0;
 
   const suggestions: string[] = [];
-  if (trades.length < 5) suggestions.push("Few trades — widen date range or lower the threshold.");
+  if (trades.length < 5)
+    suggestions.push("Few trades — widen date range or lower the threshold.");
   suggestions.push("Include fees & slippage in backtests.");
 
   return (
@@ -660,15 +663,18 @@ function OptimizerPanel({
         Optimizer Insights
       </h3>
 
-      {/* Vertical stack of short, wide rows */}
+      {/* Vertical stack of short, wide tiles */}
       <div className="flex flex-col gap-2 mb-4">
-        <MetricRow label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
+        <MetricRow
+          label="Profit Factor"
+          value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"}
+        />
         <MetricRow label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
         <MetricRow label="Hit Rate" value={fmtPct2(hitRate)} />
         <MetricRow label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      {/* Suggestions: compact and tidy; grows only if content needs it */}
+      {/* Compact suggestions box */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
         <div className="text-[12px] font-semibold text-slate-300 mb-1.5">Suggestions</div>
         <ul className="list-disc ml-5 text-[12px] leading-5 text-slate-300 space-y-1">
@@ -686,7 +692,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   const s = String(value);
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
 
-  // Keep height short; value font adapts by length + screen size
+  // Keep rows short; value font adapts to length and screen size
   const valueSize =
     significantLen > 12
       ? "text-base sm:text-lg"
@@ -697,7 +703,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2 h-14 flex items-center justify-between">
       <div className="text-[11px] sm:text-xs text-slate-400 mr-3">{label}</div>
-      <div className={`${valueSize} font-semibold tabular-nums leading-none text-slate-100`}>
+      <div className={`${valueSize} font-semibold tabular-nums leading-none`}>
         {s}
       </div>
     </div>
