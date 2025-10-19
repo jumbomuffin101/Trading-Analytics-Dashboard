@@ -55,6 +55,16 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+function yahooUrl(symbol: string, start?: string, end?: string): string {
+  if (start && end) {
+    const p1 = Math.floor(new Date(`${start}T00:00:00Z`).getTime() / 1000);
+    const p2 = Math.floor(new Date(`${end}T23:59:59Z`).getTime() / 1000);
+    return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&includePrePost=false&events=div%2Csplit`;
+  }
+  return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=6mo&interval=1d&includePrePost=false&events=div%2Csplit`;
+}
+
+
 async function fetchYahooDaily(symbol: string, start?: string, end?: string): Promise<OHLC[]> {
   try {
     let url: string;
@@ -98,6 +108,48 @@ async function fetchYahooDaily(symbol: string, start?: string, end?: string): Pr
     return [];
   }
 }
+// TEMP: debug what Yahoo returns from the Worker environment
+async function handleYahooTest(body: any) {
+  const symbol = (body?.symbol || "SPY").toString().toUpperCase();
+  const start = body?.start ? String(body.start) : undefined;
+  const end   = body?.end   ? String(body.end)   : undefined;
+
+  const url = yahooUrl(symbol, start, end);
+
+  // Try 1: current behavior (no UA)
+  const r1 = await fetch(url, { headers: { accept: "application/json" } });
+  const t1 = await r1.text();
+
+  // Try 2: with a browser-like User-Agent (some endpoints block generic bots)
+  const r2 = await fetch(url, {
+    headers: {
+      accept: "application/json",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    },
+  });
+  const t2 = await r2.text();
+
+  return new Response(JSON.stringify({
+    symbol, start, end, url,
+    try1: { ok: r1.ok, status: r1.status, len: t1.length, head: t1.slice(0, 400) },
+    try2: { ok: r2.ok, status: r2.status, len: t2.length, head: t2.slice(0, 400) },
+  }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "access-control-allow-origin": reqOrigin(body) // helper shown below
+    }
+  });
+}
+
+// small helper to reuse Origin for CORS in debug reply
+function reqOrigin(bodyOrReq: any): string {
+  // when called from fetch(req), we’ll pass req.headers to this helper if needed;
+  // for now we just return your Pages origin:
+  return "https://jumbomuffin101.github.io";
+}
+
 
 /* ------------------------------- /peek -------------------------------- */
 
