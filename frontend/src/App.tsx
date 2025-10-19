@@ -12,7 +12,8 @@ import "./index.css";
 const BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 const api = axios.create({ baseURL: BASE, timeout: 25000 });
 
-const n = (x: unknown, d = 2) => +((typeof x === "number" && isFinite(x) ? x : 0).toFixed(d));
+const n = (x: unknown, d = 2) =>
+  +((typeof x === "number" && isFinite(x) ? x : 0).toFixed(d));
 const pick = <T,>(...xs: T[]) => xs.find((v) => v !== undefined && v !== null) as T;
 
 function normalizePeek(raw: any) {
@@ -24,34 +25,51 @@ function normalizePeek(raw: any) {
     min_close: n(pick(raw?.stats?.min_close, raw?.min_close, 0)),
     median_close: n(pick(raw?.stats?.median_close, raw?.median_close, 0)),
     max_close: n(pick(raw?.stats?.max_close, raw?.max_close, 0)),
-    suggested_threshold: +n(pick(raw?.stats?.suggested_threshold, raw?.suggested_threshold, 0), 3),
+    suggested_threshold: +n(
+      pick(raw?.stats?.suggested_threshold, raw?.suggested_threshold, 0),
+      3
+    ),
     rows: typeof raw?.rows === "number" ? raw.rows : preview.length || 0,
     preview,
     note: raw?.detail || raw?.note,
   };
 }
+
 const toPct = (x: unknown) => {
   const v = Number(x);
   if (!isFinite(v)) return 0;
   return Math.abs(v) > 1 ? v / 100 : v;
 };
+
 function maxDD(eq: { equity: number }[]) {
   let p = eq[0]?.equity ?? 0, m = 0;
   for (const x of eq) { if (x.equity > p) p = x.equity; m = Math.min(m, p ? (x.equity - p) / p : 0); }
   return Math.abs(m);
 }
+
 function normalizeBacktest(raw: any, req: any) {
-  const equity_curve = Array.isArray(raw?.equity_curve) ? raw.equity_curve : (raw?.equityCurve ?? []);
+  const equity_curve = Array.isArray(raw?.equity_curve)
+    ? raw.equity_curve
+    : (raw?.equityCurve ?? []);
+
   const trades = (raw?.trades ?? []).map((t: any) => ({
-    entry_date: String(t.entry_date ?? ""), entry_price: n(t.entry_price),
-    exit_date: String(t.exit_date ?? ""),  exit_price: n(t.exit_price),
-    pnl: n(t.pnl), return_pct: toPct(t.return_pct),
+    entry_date: String(t.entry_date ?? ""),
+    entry_price: n(t.entry_price),
+    exit_date: String(t.exit_date ?? ""),
+    exit_price: n(t.exit_price),
+    pnl: n(t.pnl),
+    return_pct: toPct(t.return_pct),
   }));
-  const threshold = isFinite(+req?.threshold) ? +req.threshold : +pick(raw?.params?.threshold, raw?.threshold, 0);
-  const hold_days = isFinite(+req?.hold_days) ? +req.hold_days : +pick(raw?.params?.hold_days, raw?.hold_days, 0);
+
+  const threshold = isFinite(+req?.threshold)
+    ? +req.threshold
+    : +pick(raw?.params?.threshold, raw?.threshold, 0);
+  const hold_days = isFinite(+req?.hold_days)
+    ? +req.hold_days
+    : +pick(raw?.params?.hold_days, raw?.hold_days, 0);
 
   const initial_equity = n(pick(raw?.metrics?.initial_equity, raw?.equity_start, 1000));
-  const lastEq = equity_curve.at(-1)?.equity ?? initial_equity;
+  const lastEq = equity_curve.length ? equity_curve[equity_curve.length - 1].equity : initial_equity;
   const final_equity = n(pick(raw?.metrics?.final_equity, raw?.equity_end, lastEq));
   const total_pnl = n(final_equity - initial_equity);
   const win_rate = n(pick(raw?.metrics?.win_rate, raw?.win_rate_pct, 0), 4) / (raw?.metrics?.win_rate ? 1 : 100);
@@ -61,20 +79,34 @@ function normalizeBacktest(raw: any, req: any) {
   let annualized_return = 0;
   try {
     const yrs = (new Date(end).getTime() - new Date(start).getTime()) / 86400000 / 365;
-    if (yrs > 0 && initial_equity > 0) annualized_return = Math.pow(final_equity / initial_equity, 1 / yrs) - 1;
+    if (yrs > 0 && initial_equity > 0) {
+      annualized_return = Math.pow(final_equity / initial_equity, 1 / yrs) - 1;
+    }
   } catch {}
 
   const price_series =
     Array.isArray(raw?.price_series) && raw.price_series.length
       ? raw.price_series
-      : (raw?.preview ?? []).map((p: any) => ({ date: String(p.date ?? ""), close: n(p.close) }));
+      : (raw?.preview ?? []).map((p: any) => ({
+          date: String(p.date ?? ""),
+          close: n(p.close),
+        }));
 
   return {
     symbol: String(raw?.symbol ?? ""),
     start, end,
     params: { threshold, hold_days },
-    metrics: { total_pnl, win_rate, annualized_return, max_drawdown: maxDD(equity_curve), final_equity, initial_equity },
-    trades, equity_curve, price_series,
+    metrics: {
+      total_pnl,
+      win_rate,
+      annualized_return,
+      max_drawdown: maxDD(equity_curve),
+      final_equity,
+      initial_equity,
+    },
+    trades,
+    equity_curve,
+    price_series,
     note: raw?.detail || raw?.note,
   };
 }
@@ -98,7 +130,11 @@ type PeekResponse = {
   preview: { date: string; open: number; high: number; low: number; close: number }[];
   note?: string;
 };
-type Trade = { entry_date: string; entry_price: number; exit_date: string; exit_price: number; pnl: number; return_pct: number; };
+type Trade = {
+  entry_date: string; entry_price: number;
+  exit_date: string;  exit_price: number;
+  pnl: number; return_pct: number;
+};
 type BacktestResponse = {
   symbol: string; start: string; end: string;
   params: { threshold: number; hold_days: number };
@@ -107,7 +143,8 @@ type BacktestResponse = {
 };
 
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
-// Formats a YYYY-MM-DD string exactly as entered (no tz shift)
+
+// Format YYYY-MM-DD exactly as entered (no timezone shifts)
 const fmtDate = (iso: string) => {
   if (!iso) return "";
   const [y, m, d] = iso.split("-").map(Number);
@@ -124,14 +161,15 @@ const fmtMoney  = (v:number) => Number.isFinite(v) ? "$" + Math.round(v).toLocal
 const fmtMoney2 = (v:number) => Number.isFinite(v) ? "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
 const fmtPct1   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(1) + "%" : "";
 const fmtPct2   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(2) + "%" : "";
-const fmtSignedMoney2 = (v:number) => !Number.isFinite(v) ? "" : (v >= 0 ? "+" : "−") + Math.abs(v).toLocaleString(undefined,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtSignedMoney2 = (v:number) =>
+  !Number.isFinite(v) ? "" : (v >= 0 ? "+" : "−") +
+  Math.abs(v).toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 type ChartMode = "equity" | "price";
 type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 
 /* ========== Main App ========== */
 export default function App() {
-  // Blank symbol on load.
   const today = new Date();
   const yday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   const ydayISO = yday.toISOString().slice(0,10);
@@ -155,8 +193,19 @@ export default function App() {
 
   useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
 
-  const parseThreshold = () => threshold.trim() === "" ? null : (isFinite(+threshold) ? +threshold : null);
-  const parseHoldDays  = () => holdDays.trim()  === "" ? null : (Number.isInteger(+holdDays) && +holdDays >= 1 ? +holdDays : null);
+  const parseThreshold = () => {
+    const s = threshold.trim();
+    if (!s) return null;
+    const v = Number(s);
+    return isFinite(v) ? v : null;
+  };
+  const parseHoldDays = () => {
+    const s = holdDays.trim();
+    if (!s) return null;
+    const v = parseInt(s, 10);
+    return Number.isFinite(v) && v >= 1 ? v : null;
+  };
+
   const canPeek = symbol.trim().length > 0;
 
   const doPeek = async () => {
@@ -164,21 +213,32 @@ export default function App() {
     try {
       const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
       setPeek(res.data);
-      if (isFinite(res.data?.suggested_threshold)) setThreshold(res.data.suggested_threshold.toFixed(2));
-    } catch (e:any) { setError(e?.response?.data?.detail ?? e.message); setPeek(null); }
-    finally { setPeekBusy(false); setLoading(false); }
+      if (isFinite(res.data?.suggested_threshold)) {
+        setThreshold(res.data.suggested_threshold.toFixed(2));
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? e.message);
+      setPeek(null);
+    } finally {
+      setPeekBusy(false);
+      setLoading(false);
+    }
   };
 
   const doBacktest = async () => {
     setError(null); setLoading(true); setResult(null);
     try {
-      const thr = parseThreshold(); const hd = parseHoldDays();
+      const thr = parseThreshold();
+      const hd = parseHoldDays();
       if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
-      if (hd  === null) throw new Error("Hold Days must be a whole number ≥ 1.");
-      const res = await api.post<BacktestResponse>("/backtest", {symbol, start, end, threshold: thr, hold_days: hd});
+      if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
+      const res = await api.post<BacktestResponse>("/backtest", { symbol, start, end, threshold: thr, hold_days: hd });
       setResult(res.data);
-    } catch (e:any) { setError(e?.response?.data?.detail ?? e.message); }
-    finally { setLoading(false); }
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const dateIndex = useMemo(() => {
@@ -188,38 +248,44 @@ export default function App() {
   }, [result]);
 
   const tradesWithBars = useMemo(() => {
-    const t = (result?.trades ?? []).map(tr => {
-      const iE = dateIndex.get(tr.entry_date), iX = dateIndex.get(tr.exit_date);
-      return { ...tr, daysBars: (iE !== undefined && iX !== undefined) ? Math.max(0, iX - iE) : NaN };
+    const t = (result?.trades ?? []).map((tr) => {
+      const iE = dateIndex.get(tr.entry_date);
+      const iX = dateIndex.get(tr.exit_date);
+      const bars = iE !== undefined && iX !== undefined ? Math.max(0, iX - iE) : NaN;
+      return { ...tr, daysBars: bars };
     });
-    const dir = (sortDir === "asc") ? 1 : -1;
-    return [...t].sort((a:any,b:any) => (["entry_date","exit_date"].includes(sortKey)
-      ? (a[sortKey] < b[sortKey] ? -1 : a[sortKey] > b[sortKey] ? 1 : 0)
-      : ((a as any)[sortKey] - (b as any)[sortKey])) * dir
-    );
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...t].sort((a: any, b: any) => {
+      if (sortKey === "entry_date" || sortKey === "exit_date") {
+        return (a[sortKey] < b[sortKey] ? -1 : a[sortKey] > b[sortKey] ? 1 : 0) * dir;
+      }
+      return ((a as any)[sortKey] - (b as any)[sortKey]) * dir;
+    });
   }, [result, sortKey, sortDir, dateIndex]);
 
   const kpis = useMemo(() => {
     const count = tradesWithBars.length;
-    const totalPnL = tradesWithBars.reduce((s,x)=>s+x.pnl,0);
-    const wins = tradesWithBars.filter(x => x.pnl > 0);
-    const winRate  = count ? wins.length / count : 0;
-    const best = count ? Math.max(...tradesWithBars.map(x=>x.pnl)) : 0;
-    const worst = count ? Math.min(...tradesWithBars.map(x=>x.pnl)) : 0;
+    const totalPnL = tradesWithBars.reduce((s, x) => s + x.pnl, 0);
+    const wins = tradesWithBars.filter((x) => x.pnl > 0);
+    const winRate = count ? wins.length / count : 0;
+    const best = count ? Math.max(...tradesWithBars.map((x) => x.pnl)) : 0;
+    const worst = count ? Math.min(...tradesWithBars.map((x) => x.pnl)) : 0;
     return { count, totalPnL, winRate, best, worst };
   }, [tradesWithBars]);
 
   const avgTradeReturn = useMemo(() => {
-    const t = result?.trades ?? []; return t.length ? t.reduce((s,x)=>s+x.return_pct,0) / t.length : 0;
+    const t = result?.trades ?? [];
+    return t.length ? t.reduce((s, x) => s + x.return_pct, 0) / t.length : 0;
   }, [result]);
 
   const xTickFormatter = (iso: string) =>
-    new Intl.DateTimeFormat("en-US",{year:"numeric",month:"2-digit"}).format(new Date(iso));
+    new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit" }).format(new Date(iso));
+
   const thrInvalid = threshold.trim() !== "" && parseThreshold() === null;
   const hdInvalid  = holdDays.trim() !== "" && parseHoldDays() === null;
 
   const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d)=> d==="asc" ? "desc" : "asc");
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir("asc"); }
   };
 
@@ -242,64 +308,77 @@ export default function App() {
           <div className="text-xs text-slate-400 mt-1 mb-3">Pick a symbol, choose dates, and click Peek.</div>
 
           <div className="flex flex-wrap gap-2 mb-3">
-            {PRESETS.map(sym => (
-              <button key={sym} className={"chip " + (symbol === sym ? "active" : "")} onClick={()=>setSymbol(sym)} type="button">{sym}</button>
+            {PRESETS.map((sym) => (
+              <button
+                key={sym}
+                className={"chip " + (symbol === sym ? "active" : "")}
+                onClick={() => setSymbol(sym)}
+                type="button"
+              >
+                {sym}
+              </button>
             ))}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <label className="text-sm">
               <div className="mb-1 text-slate-300">Symbol</div>
-              <input className="input" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} list="symbols" placeholder="e.g. AAPL"/>
-              <datalist id="symbols">{PRESETS.map(s => <option key={s} value={s} />)}</datalist>
+              <input
+                className="input"
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                list="symbols"
+                placeholder="e.g. AAPL"
+              />
+              <datalist id="symbols">{PRESETS.map((s) => <option key={s} value={s} />)}</datalist>
             </label>
-            <label className="text-sm"><div className="mb-1 text-slate-300">Start</div><input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} max={ydayISO}/></label>
-            <label className="text-sm"><div className="mb-1 text-slate-300">End</div><input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} max={ydayISO}/></label>
+            <label className="text-sm">
+              <div className="mb-1 text-slate-300">Start</div>
+              <input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} max={ydayISO} />
+            </label>
+            <label className="text-sm">
+              <div className="mb-1 text-slate-300">End</div>
+              <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} max={ydayISO} />
+            </label>
           </div>
 
           <div className="flex flex-wrap gap-3 mt-4 items-center">
-            <button className="btn-primary" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>{peekBusy ? "Peeking…" : "Peek"}</button>
+            <button className="btn-primary" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
+              {peekBusy ? "Peeking…" : "Peek"}
+            </button>
             {error && <span className="text-rose-400">Error: {error}</span>}
           </div>
         </div>
 
-{/* Peek snapshot */}
-{peek && (
-  <div className="card p-8 space-y-4">
-    <div className="flex items-center justify-between">
-      <div>
-        <h3 className="text-2xl font-bold tracking-tight text-emerald-400">
-          {peek.symbol} Market Snapshot
-        </h3>
+        {/* Peek snapshot */}
+        {peek && (
+          <div className="card p-8 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold tracking-tight text-emerald-400">
+                  {peek.symbol} Market Snapshot
+                </h3>
+                {/* EXACT user-selected dates; show backend span only if different */}
+                <div className="text-sm text-slate-400">
+                  {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
+                  {(peek.start && peek.end) && (peek.start !== start || peek.end !== end) && (
+                    <span className="ml-2 text-xs text-slate-500">
+                      (data span {fmtDate(peek.start)} – {fmtDate(peek.end)})
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
+            </div>
 
-        {/* EXACT user-selected dates; show backend span only if different */}
-        <div className="text-sm text-slate-400">
-          {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
-          {(peek.start && peek.end) &&
-            (peek.start !== start || peek.end !== end) && (
-              <span className="ml-2 text-xs text-slate-500">
-                (data span {fmtDate(peek.start)} – {fmtDate(peek.end)})
-              </span>
-            )}
-        </div>
-      </div>
-
-      <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
-    </div>
-
-    <div className="grid sm:grid-cols-4 gap-4">
-      <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
-      <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
-      <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
-      <Stat
-        label="Suggested Threshold"
-        value={peek.suggested_threshold.toFixed(2)}
-        sub="75th percentile"
-      />
-    </div>
-  </div>
-)}
-
+            <div className="grid sm:grid-cols-4 gap-4">
+              <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
+              <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
+              <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
+              <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile" />
+            </div>
+          </div>
+        )}
 
         {/* Strategy Parameters */}
         <div className="card p-6 sm:p-7">
@@ -308,16 +387,43 @@ export default function App() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
               <label className="text-sm">
                 <div className="mb-1 text-slate-300">Threshold</div>
-                <input className={"input " + (thrInvalid ? "ring-2 ring-rose-500" : "")} inputMode="decimal" step="any" value={threshold} onChange={e=>setThreshold(e.target.value)} placeholder="e.g. 185.75"/>
+                <input
+                  className={"input " + (thrInvalid ? "ring-2 ring-rose-500" : "")}
+                  inputMode="decimal"
+                  step="any"
+                  value={threshold}
+                  onChange={(e) => setThreshold(e.target.value)}
+                  placeholder="e.g. 185.75"
+                />
               </label>
               <label className="text-sm">
                 <div className="mb-1 text-slate-300">Hold Days</div>
-                <input className={"input " + (hdInvalid ? "ring-2 ring-rose-500" : "")} inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={e=>setHoldDays(e.target.value)} placeholder=">= 1"/>
+                <input
+                  className={"input " + (hdInvalid ? "ring-2 ring-rose-500" : "")}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  min={1}
+                  value={holdDays}
+                  onChange={(e) => setHoldDays(e.target.value)}
+                  placeholder=">= 1"
+                />
               </label>
               <div className="sm:col-span-2 flex items-center gap-3">
-                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canPeek}>Run Backtest</button>
+                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canPeek}>
+                  Run Backtest
+                </button>
                 {result?.trades?.length ? (
-                  <button className="btn-ghost" onClick={()=>exportTradesCSV(tradesWithBars as any, `${result.symbol}_${result.start}_${result.end}_trades.csv`)}>Export CSV</button>
+                  <button
+                    className="btn-ghost"
+                    onClick={() =>
+                      exportTradesCSV(
+                        tradesWithBars as any,
+                        `${result.symbol}_${result.start}_${result.end}_trades.csv`
+                      )
+                    }
+                  >
+                    Export CSV
+                  </button>
                 ) : null}
               </div>
             </div>
@@ -340,11 +446,10 @@ export default function App() {
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Backtest Results</h3>
                   <div className="flex items-center gap-2 text-sm text-slate-400">
-                    {/* EXACT user-selected dates */}
                     {fmtDate(start)} – {fmtDate(end)} • {result.symbol}
                     <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
-                      <button className={"px-3 py-1 rounded-md " + (mode==="equity" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={()=>setMode("equity")}>Equity</button>
-                      <button className={"px-3 py-1 rounded-md " + (mode==="price" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={()=>setMode("price")}>Price</button>
+                      <button className={"px-3 py-1 rounded-md " + (mode === "equity" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={() => setMode("equity")}>Equity</button>
+                      <button className={"px-3 py-1 rounded-md " + (mode === "price" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={() => setMode("price")}>Price</button>
                     </div>
                   </div>
                 </div>
@@ -355,36 +460,36 @@ export default function App() {
                       <AreaChart data={result?.equity_curve ?? []} margin={{ left: 68, right: 16, top: 10, bottom: 38 }}>
                         <defs>
                           <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.32}/>
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0.03}/>
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.32} />
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0.03} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false}/>
-                        <XAxis dataKey="date" tickMargin={12} stroke="#94a3b8" tickFormatter={(d)=>new Intl.DateTimeFormat("en-US",{year:"numeric",month:"2-digit"}).format(new Date(d))}>
+                        <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false} />
+                        <XAxis dataKey="date" tickMargin={12} stroke="#94a3b8" tickFormatter={(d) => new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit" }).format(new Date(d))}>
                           <Label value="Date" position="bottom" offset={24} fill="#94a3b8" />
                         </XAxis>
                         <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
                           <Label value="Equity ($)" angle={-90} position="insideLeft" offset={14} dx={-60} dy={30} fill="#94a3b8" />
                         </YAxis>
-                        <Tooltip contentStyle={{ background:"#0f172a", border:"1px solid #1f2937", borderRadius:12 }} formatter={(v:any)=>[fmtMoney2(v as number),"Equity"]}/>
+                        <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }} formatter={(v: any) => [fmtMoney2(v as number), "Equity"]} />
                         <Area type="monotone" dataKey="equity" stroke="#10b981" fill="url(#eqFill)" strokeWidth={2} />
                       </AreaChart>
                     ) : (
                       <LineChart data={result?.price_series ?? []} margin={{ left: 72, right: 16, top: 10, bottom: 38 }}>
-                        <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false}/>
+                        <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false} />
                         <XAxis dataKey="date" tickMargin={12} stroke="#94a3b8" tickFormatter={xTickFormatter}>
                           <Label value="Date" position="bottom" offset={24} fill="#94a3b8" />
                         </XAxis>
                         <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
                           <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-20} fill="#94a3b8" />
                         </YAxis>
-                        <Tooltip contentStyle={{ background:"#0f172a", border:"1px solid #1f2937", borderRadius:12 }} formatter={(v:any)=>[fmtMoney2(v as number),"Close"]}/>
-                        <Line type="monotone" dataKey="close" stroke="#60a5fa" dot={false} strokeWidth={2}/>
+                        <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }} formatter={(v: any) => [fmtMoney2(v as number), "Close"]} />
+                        <Line type="monotone" dataKey="close" stroke="#60a5fa" dot={false} strokeWidth={2} />
                         <ReferenceLine y={Number(result?.params?.threshold ?? threshold) || undefined} stroke="#f59e0b" strokeDasharray="4 4" />
-                        {(result?.trades ?? []).map((t,i)=>(
+                        {(result?.trades ?? []).map((t, i) => (
                           <g key={i}>
                             <ReferenceDot x={t.entry_date} y={t.entry_price} r={4} fill="#10b981" stroke="#064e3b" />
-                            <ReferenceDot x={t.exit_date}  y={t.exit_price}  r={4} fill="#ef4444" stroke="#7f1d1d" />
+                            <ReferenceDot x={t.exit_date} y={t.exit_price} r={4} fill="#ef4444" stroke="#7f1d1d" />
                           </g>
                         ))}
                       </LineChart>
@@ -414,10 +519,12 @@ export default function App() {
               <div className="flex flex-col h-full">
                 <div className="card p-6 mb-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Trades ({tradesWithBars.length})</h3>
+                    <h3 className="text-2xl font-bold tracking-tight text-emerald-400">
+                      Trades ({tradesWithBars.length})
+                    </h3>
                     <div className="flex gap-2 text-xs text-slate-400">
-                      <button className={"px-3 py-1 rounded-md border " + (tradeView === "cards" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-700 text-slate-300")} onClick={()=>setTradeView("cards")}>Cards</button>
-                      <button className={"px-3 py-1 rounded-md border " + (tradeView === "table" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-700 text-slate-300")} onClick={()=>setTradeView("table")}>Table</button>
+                      <button className={"px-3 py-1 rounded-md border " + (tradeView === "cards" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-700 text-slate-300")} onClick={() => setTradeView("cards")}>Cards</button>
+                      <button className={"px-3 py-1 rounded-md border " + (tradeView === "table" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-700 text-slate-300")} onClick={() => setTradeView("table")}>Table</button>
                     </div>
                   </div>
 
@@ -431,12 +538,14 @@ export default function App() {
                               <div className="text-sm font-semibold text-slate-200 mb-2">{t.entry_date}</div>
                               <div className="text-sm text-slate-300 space-y-1">
                                 <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
-                                <Row k="Exit Px"  v={t.exit_price.toFixed(2)} />
-                                <Row k="PnL"  v={`${positive?"+":""}${t.pnl.toFixed(2)}`} tone={positive?"win":"loss"} />
-                                <Row k="Return" v={`${(t.return_pct*100).toFixed(2)}%`} tone={positive?"win":"loss"} />
+                                <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
+                                <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
+                                <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
                                 <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
                                 <div className="flex justify-end">
-                                  <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-emerald-900/40 text-emerald-300" : "bg-rose-900/40 text-rose-300")}>{positive ? "Win" : "Loss"}</span>
+                                  <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-emerald-900/40 text-emerald-300" : "bg-rose-900/40 text-rose-300")}>
+                                    {positive ? "Win" : "Loss"}
+                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -449,12 +558,12 @@ export default function App() {
                       <table className="table text-sm w-full">
                         <thead>
                           <tr>
-                            <Th onClick={()=>toggleSort("entry_date")}>Date In {sortKey==="entry_date" ? (sortDir==="asc"?"^":"v"):""}</Th>
-                            <Th onClick={()=>toggleSort("exit_date")}>Date Out {sortKey==="exit_date" ? (sortDir==="asc"?"^":"v"):""}</Th>
+                            <Th onClick={() => toggleSort("entry_date")}>Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                            <Th onClick={() => toggleSort("exit_date")}>Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
                             <Th>Entry</Th><Th>Exit</Th>
-                            <Th onClick={()=>toggleSort("pnl")}>PnL {sortKey==="pnl" ? (sortDir==="asc"?"^":"v"):""}</Th>
-                            <Th onClick={()=>toggleSort("return_pct")}>Return % {sortKey==="return_pct" ? (sortDir==="asc"?"^":"v"):""}</Th>
-                            <Th onClick={()=>toggleSort("daysBars")}>Bars {sortKey==="daysBars" ? (sortDir==="asc"?"^":"v"):""}</Th>
+                            <Th onClick={() => toggleSort("pnl")}>PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                            <Th onClick={() => toggleSort("return_pct")}>Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                            <Th onClick={() => toggleSort("daysBars")}>Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
                           </tr>
                         </thead>
                         <tbody>
@@ -486,14 +595,16 @@ export default function App() {
           </>
         )}
 
-        <div className="text-center text-xs text-slate-500">Created by <span className="font-semibold">Aryan Rawat</span></div>
+        <div className="text-center text-xs text-slate-500">
+          Created by <span className="font-semibold">Aryan Rawat</span>
+        </div>
       </div>
     </div>
   );
 }
 
 /* ========== Small UI bits ========== */
-function Stat({ label, value, sub }: { label:string; value:string; sub?:string }) {
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="p-5 rounded-xl bg-slate-900/40 border border-slate-800">
       <div className="text-sm text-slate-400">{label}</div>
@@ -502,15 +613,14 @@ function Stat({ label, value, sub }: { label:string; value:string; sub?:string }
     </div>
   );
 }
-function Row({k,v,tone}:{k:string;v:any;tone?:"win"|"loss"}) {
-  const c = tone==="win"?"text-emerald-300":tone==="loss"?"text-rose-300":"text-slate-300";
+function Row({ k, v, tone }: { k: string; v: any; tone?: "win" | "loss" }) {
+  const c = tone === "win" ? "text-emerald-300" : tone === "loss" ? "text-rose-300" : "text-slate-300";
   return <div className={`flex justify-between ${c}`}><span>{k}</span><span className="tabular-nums">{v}</span></div>;
 }
-function Th({children, onClick}:{children:any; onClick?:()=>void}) {
-  return <th className={"cursor-pointer"} onClick={onClick}>{children}</th>;
+function Th({ children, onClick }: { children: any; onClick?: () => void }) {
+  return <th className="cursor-pointer" onClick={onClick}>{children}</th>;
 }
 
-/* ========== Optimizer Panel (fills card & fits numbers) ========== */
 /* ========== Optimizer Panel (smaller fonts + extra suggestion) ========== */
 function OptimizerPanel({
   result,
@@ -539,22 +649,13 @@ function OptimizerPanel({
   const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
   const suggestions: string[] = [];
-  if (trades.length < 5)
-    suggestions.push("Few trades — widen date range or lower the threshold.");
-  if (profitFactor < 1 && trades.length >= 5)
-    suggestions.push("Profit factor < 1 — raise threshold or shorten hold days.");
-  if (profitFactor >= 1.3 && hitRate < 0.5)
-    suggestions.push("Good R/R — keep losers small; don’t chase win rate.");
-  if (expectancy <= 0 && trades.length >= 5)
-    suggestions.push("Negative expectancy — tune threshold & hold days.");
-  if (result.metrics.max_drawdown > 0.2)
-    suggestions.push("Drawdown > 20% — add risk controls or trend filter.");
-  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10)
-    suggestions.push("Low annualized return — try 2–5 hold days or MA filter.");
-  if (avgBars > Number(result.params.hold_days) + 0.5)
-    suggestions.push("Avg bars exceed hold — verify exits or use fixed-bar exits.");
-
-  // Always add one concise general suggestion so the box feels complete
+  if (trades.length < 5) suggestions.push("Few trades — widen date range or lower the threshold.");
+  if (profitFactor < 1 && trades.length >= 5) suggestions.push("Profit factor < 1 — raise threshold or shorten hold days.");
+  if (profitFactor >= 1.3 && hitRate < 0.5) suggestions.push("Good R/R — keep losers small; don't chase win rate.");
+  if (expectancy <= 0 && trades.length >= 5) suggestions.push("Negative expectancy — tune threshold & hold days.");
+  if (result.metrics.max_drawdown > 0.2) suggestions.push("Drawdown > 20% — add risk controls or trend filter.");
+  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10) suggestions.push("Low annualized return — try 2–5 hold days or MA filter.");
+  if (avgBars > Number(result.params.hold_days) + 0.5) suggestions.push("Avg bars exceed hold — verify exits or use fixed-bar exits.");
   suggestions.push("Include fees & slippage in backtests.");
 
   return (
@@ -563,7 +664,6 @@ function OptimizerPanel({
         Optimizer Insights
       </h3>
 
-      {/* smaller, tidy tiles; 2 cols on small, 4 on md+ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <MiniStat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
         <MiniStat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
@@ -571,11 +671,10 @@ function OptimizerPanel({
         <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      {/* suggestions fill remaining height for a full, balanced card */}
       <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4 flex-1">
         <div className="text-[13px] font-semibold text-slate-300 mb-2">Suggestions</div>
         <ul className="list-disc ml-5 text-[13px] leading-6 text-slate-300 space-y-1">
-          {suggestions.slice(0, 4).map((s, i) => (  // cap to 4 short items to keep it clean
+          {suggestions.slice(0, 4).map((s, i) => (
             <li key={i}>{s}</li>
           ))}
         </ul>
@@ -584,20 +683,13 @@ function OptimizerPanel({
   );
 }
 
-/* Smaller font stat tile with gentle autosizing for long numbers */
 function MiniStat({ label, value }: { label: string; value: string }) {
   const s = String(value);
-  const size =
-    s.length > 12 ? "text-base"
-    : s.length > 9  ? "text-lg"
-    : "text-xl";
-
+  const size = s.length > 12 ? "text-base" : s.length > 9 ? "text-lg" : "text-xl";
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 h-20 flex flex-col justify-center">
       <div className="text-[10px] leading-4 text-slate-400">{label}</div>
-      <div className={`${size} md:text-2xl font-semibold tabular-nums leading-tight`}>
-        {s}
-      </div>
+      <div className={`${size} md:text-2xl font-semibold tabular-nums leading-tight`}>{s}</div>
     </div>
   );
 }
