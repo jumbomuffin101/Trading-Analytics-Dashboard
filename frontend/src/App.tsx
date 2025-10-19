@@ -107,7 +107,19 @@ type BacktestResponse = {
 };
 
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
-const fmtDate = (iso: string) => new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric"}).format(new Date(iso));
+// Formats a YYYY-MM-DD string exactly as entered (no tz shift)
+const fmtDate = (iso: string) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(dt);
+};
+
 const fmtMoney  = (v:number) => Number.isFinite(v) ? "$" + Math.round(v).toLocaleString() : "";
 const fmtMoney2 = (v:number) => Number.isFinite(v) ? "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
 const fmtPct1   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(1) + "%" : "";
@@ -251,25 +263,43 @@ export default function App() {
           </div>
         </div>
 
-        {/* Peek snapshot */}
-        {peek && (
-          <div className="card p-8 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-2xl font-bold tracking-tight text-emerald-400">{peek.symbol} Market Snapshot</h3>
-                {/* EXACT user-selected dates */}
-                <div className="text-sm text-slate-400">{fmtDate(start)} – {fmtDate(end)}</div>
-              </div>
-              <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
-            </div>
-            <div className="grid sm:grid-cols-4 gap-4">
-              <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
-              <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
-              <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
-              <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile"/>
-            </div>
-          </div>
-        )}
+{/* Peek snapshot */}
+{peek && (
+  <div className="card p-8 space-y-4">
+    <div className="flex items-center justify-between">
+      <div>
+        <h3 className="text-2xl font-bold tracking-tight text-emerald-400">
+          {peek.symbol} Market Snapshot
+        </h3>
+
+        {/* EXACT user-selected dates; show backend span only if different */}
+        <div className="text-sm text-slate-400">
+          {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
+          {(peek.start && peek.end) &&
+            (peek.start !== start || peek.end !== end) && (
+              <span className="ml-2 text-xs text-slate-500">
+                (data span {fmtDate(peek.start)} – {fmtDate(peek.end)})
+              </span>
+            )}
+        </div>
+      </div>
+
+      <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
+    </div>
+
+    <div className="grid sm:grid-cols-4 gap-4">
+      <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
+      <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
+      <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
+      <Stat
+        label="Suggested Threshold"
+        value={peek.suggested_threshold.toFixed(2)}
+        sub="75th percentile"
+      />
+    </div>
+  </div>
+)}
+
 
         {/* Strategy Parameters */}
         <div className="card p-6 sm:p-7">
