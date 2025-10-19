@@ -622,6 +622,7 @@ function Th({ children, onClick }: { children: any; onClick?: () => void }) {
 }
 
 /* ========== Optimizer Panel (smaller fonts + extra suggestion) ========== */
+/* ========== Optimizer Panel (bigger tiles, smaller suggestions) ========== */
 function OptimizerPanel({
   result,
   trades,
@@ -650,12 +651,6 @@ function OptimizerPanel({
 
   const suggestions: string[] = [];
   if (trades.length < 5) suggestions.push("Few trades — widen date range or lower the threshold.");
-  if (profitFactor < 1 && trades.length >= 5) suggestions.push("Profit factor < 1 — raise threshold or shorten hold days.");
-  if (profitFactor >= 1.3 && hitRate < 0.5) suggestions.push("Good R/R — keep losers small; don't chase win rate.");
-  if (expectancy <= 0 && trades.length >= 5) suggestions.push("Negative expectancy — tune threshold & hold days.");
-  if (result.metrics.max_drawdown > 0.2) suggestions.push("Drawdown > 20% — add risk controls or trend filter.");
-  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10) suggestions.push("Low annualized return — try 2–5 hold days or MA filter.");
-  if (avgBars > Number(result.params.hold_days) + 0.5) suggestions.push("Avg bars exceed hold — verify exits or use fixed-bar exits.");
   suggestions.push("Include fees & slippage in backtests.");
 
   return (
@@ -664,17 +659,22 @@ function OptimizerPanel({
         Optimizer Insights
       </h3>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MiniStat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
+      {/* Bigger tiles; 2 cols on small, 4 on md+ */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <MiniStat
+          label="Profit Factor"
+          value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"}
+        />
         <MiniStat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
         <MiniStat label="Hit Rate" value={fmtPct2(hitRate)} />
         <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4 flex-1">
-        <div className="text-[13px] font-semibold text-slate-300 mb-2">Suggestions</div>
-        <ul className="list-disc ml-5 text-[13px] leading-6 text-slate-300 space-y-1">
-          {suggestions.slice(0, 4).map((s, i) => (
+      {/* Smaller suggestions box (content-sized, capped height) */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 md:p-4 max-h-40 overflow-auto">
+        <div className="text-[12px] font-semibold text-slate-300 mb-1.5">Suggestions</div>
+        <ul className="list-disc ml-5 text-[12px] leading-5 text-slate-300 space-y-1">
+          {suggestions.map((s, i) => (
             <li key={i}>{s}</li>
           ))}
         </ul>
@@ -683,27 +683,22 @@ function OptimizerPanel({
   );
 }
 
-/* Adaptive, readable number sizing for Optimizer tiles */
+/* Larger tiles, slightly smaller value fonts with adaptive sizing */
 function MiniStat({ label, value }: { label: string; value: string }) {
   const s = String(value);
-
-  // Count only significant characters to decide sizing
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
 
-  // Size tiers:
-  // - long values -> smaller
-  // - medium values -> medium
-  // - short values -> larger (but still restrained on small screens)
+  // More conservative sizes so longer values still fit comfortably
   const sizeClass =
     significantLen > 12
       ? "text-sm sm:text-base md:text-lg"
       : significantLen > 9
-      ? "text-base sm:text-lg md:text-xl"
-      : "text-lg sm:text-xl md:text-2xl";
+      ? "text-base md:text-lg"
+      : "text-lg md:text-xl";
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 h-20 flex flex-col justify-center">
-      <div className="text-[11px] leading-4 text-slate-400">{label}</div>
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 h-24 md:h-28 flex flex-col justify-center">
+      <div className="text-[10px] leading-4 text-slate-400">{label}</div>
       <div className={`${sizeClass} font-semibold tabular-nums leading-tight`}>
         {s}
       </div>
