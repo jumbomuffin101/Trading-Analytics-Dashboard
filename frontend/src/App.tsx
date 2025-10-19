@@ -510,7 +510,7 @@ function Th({children, onClick}:{children:any; onClick?:()=>void}) {
   return <th className={"cursor-pointer"} onClick={onClick}>{children}</th>;
 }
 
-/* ========== Optimizer Panel (fixed layout) ========== */
+/* ========== Optimizer Panel (fills card & fits numbers) ========== */
 function OptimizerPanel({
   result,
   trades,
@@ -542,31 +542,61 @@ function OptimizerPanel({
     : 0;
 
   const suggestions: string[] = [];
-  if (trades.length < 5) suggestions.push("Few trades — widen date range or lower the threshold to collect more samples.");
-  if (profitFactor < 1 && trades.length >= 5) suggestions.push("Profit factor < 1. Raise threshold or shorten hold days to cut losers faster.");
-  if (profitFactor >= 1.3 && hitRate < 0.5) suggestions.push("Good profit factor with <50% win rate — reward/risk looks healthy; keep losers small.");
-  if (expectancy <= 0 && trades.length >= 5) suggestions.push("Negative expectancy. Tune threshold & hold days (use Peek’s suggestion + small increments).");
-  if (result.metrics.max_drawdown > 0.2) suggestions.push("Max drawdown > 20%. Add risk controls (smaller size, tighter exits, or a trend filter).");
-  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10) suggestions.push("Low annualized return. Try alternative hold days (2–5) or a simple 50D MA trend filter).");
-  if (avgBars > Number(result.params.hold_days) + 0.5) suggestions.push("Average bars exceed configured hold — consider fixed-bar exits or verify date alignment.");
-  if (!suggestions.length) suggestions.push("Metrics look balanced. Next step: forward-test and compare live vs. backtest.");
+  if (trades.length < 5)
+    suggestions.push(
+      "Few trades — widen date range or lower the threshold to collect more samples."
+    );
+  if (profitFactor < 1 && trades.length >= 5)
+    suggestions.push(
+      "Profit factor < 1. Raise threshold or shorten hold days to cut losers faster."
+    );
+  if (profitFactor >= 1.3 && hitRate < 0.5)
+    suggestions.push(
+      "Good profit factor with <50% win rate — reward/risk looks healthy; keep losers small."
+    );
+  if (expectancy <= 0 && trades.length >= 5)
+    suggestions.push(
+      "Negative expectancy. Tune threshold & hold days (use Peek’s suggestion + small increments)."
+    );
+  if (result.metrics.max_drawdown > 0.2)
+    suggestions.push(
+      "Max drawdown > 20%. Add risk controls (smaller size, tighter exits, or a trend filter)."
+    );
+  if (Math.abs(result.metrics.annualized_return) < 0.02 && trades.length >= 10)
+    suggestions.push(
+      "Low annualized return. Try alternative hold days (2–5) or a simple 50D MA trend filter."
+    );
+  if (avgBars > Number(result.params.hold_days) + 0.5)
+    suggestions.push(
+      "Average bars exceed configured hold — consider fixed-bar exits or verify date alignment."
+    );
+  if (!suggestions.length)
+    suggestions.push(
+      "Metrics look balanced. Next step: forward-test and compare live vs. backtest."
+    );
 
   return (
-    <div className="card p-6 mt-0 flex-1 flex flex-col">
+    <div className="card p-6 flex-1 flex flex-col">
       <h3 className="text-2xl font-bold tracking-tight text-emerald-400 mb-4">
         Optimizer Insights
       </h3>
 
-      {/* Clean, compact tiles that don't overlap */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MiniStat label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} />
+      {/* Responsive, full-width stat tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <MiniStat
+          label="Profit Factor"
+          value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"}
+        />
         <MiniStat label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
         <MiniStat label="Hit Rate" value={fmtPct2(hitRate)} />
-        <MiniStat label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
+        <MiniStat
+          label="Avg Bars (Median)"
+          value={`${avgBars.toFixed(1)} (${medBars})`}
+        />
       </div>
 
-      {/* Suggestions area */}
-      <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+      {/* Suggestions grow to fill remaining space so the card uses full height */}
+      <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/40 p-4 flex-1">
         <div className="text-sm font-semibold text-slate-300 mb-2">Suggestions</div>
         <ul className="list-disc ml-5 text-slate-300 space-y-1">
           {suggestions.map((s, i) => (
@@ -578,12 +608,20 @@ function OptimizerPanel({
   );
 }
 
+/* Stat tile that auto-adjusts number size to fit neatly */
 function MiniStat({ label, value }: { label: string; value: string }) {
+  const s = String(value);
+  // Shrink font slightly for long numbers like "+$12,345.67" or "100.00%"
+  const size =
+    s.length > 12 ? "text-lg"
+      : s.length > 9 ? "text-xl"
+      : "text-2xl md:text-3xl";
+
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3 min-h-[78px] flex flex-col justify-center">
-      <div className="text-[11px] text-slate-400 truncate">{label}</div>
-      <div className="text-lg font-semibold tabular-nums leading-tight">
-        {value}
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 h-24 flex flex-col justify-center">
+      <div className="text-xs leading-4 text-slate-400">{label}</div>
+      <div className={`${size} font-semibold tabular-nums leading-tight`}>
+        {s}
       </div>
     </div>
   );
