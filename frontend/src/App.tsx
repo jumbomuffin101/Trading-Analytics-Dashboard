@@ -8,9 +8,6 @@ import "./index.css";
 
 /* ========= AXIOS CLIENT (normalized responses) ========= */
 
-const safeNum = (v: any, fallback = 0) =>
-  Number.isFinite(Number(v)) ? Number(v) : fallback;
-
 const BASE = (import.meta as any).env?.VITE_API_BASE || "/api";
 
 const api = axios.create({
@@ -27,7 +24,6 @@ const pick = <T,>(...cands: T[]) => {
 function normalizePeek(raw: any) {
   const preview = Array.isArray(raw?.preview) ? raw.preview : [];
 
-  // choose from nested stats, flat snake_case, or camelCase
   const min_close = n(pick(raw?.stats?.min_close, raw?.min_close, raw?.minClose, 0));
   const median_close = n(pick(raw?.stats?.median_close, raw?.median_close, raw?.medianClose, 0));
   const max_close = n(pick(raw?.stats?.max_close, raw?.max_close, raw?.maxClose, 0));
@@ -46,16 +42,14 @@ function normalizePeek(raw: any) {
 
   const start =
     raw?.start ??
-    (preview.length ? preview[0].date : "") ??
-    "";
+    (preview.length ? preview[0].date : "") ?? "";
   const end =
     raw?.end ??
-    (preview.length ? preview[preview.length - 1].date : "") ??
-    "";
+    (preview.length ? preview[preview.length - 1].date : "") ?? "";
 
   const symbol = (raw?.symbol ?? "").toString();
 
-  const normalized = {
+  return {
     symbol,
     start,
     end,
@@ -67,14 +61,11 @@ function normalizePeek(raw: any) {
     preview,
     note: raw?.detail || raw?.note,
   };
-
-  return normalized;
 }
 
 function toDecimalPct(x: unknown) {
   const v = Number(x);
   if (!isFinite(v)) return 0;
-  // if it looks like 2.3 (== 2.3%), convert to 0.023
   return Math.abs(v) > 1 ? v / 100 : v;
 }
 
@@ -86,11 +77,10 @@ function computeMaxDrawdown(series: { equity: number }[]) {
     const dd = peak ? (p.equity - peak) / peak : 0;
     if (dd < mdd) mdd = dd;
   }
-  return Math.abs(mdd); // return as positive fraction (0–1)
+  return Math.abs(mdd);
 }
 
 function normalizeBacktest(raw: any, reqBodyJson: any) {
-  // arrays
   const tradesRaw = Array.isArray(raw?.trades) ? raw.trades : [];
   const equity_curve =
     Array.isArray(raw?.equity_curve)
@@ -99,7 +89,6 @@ function normalizeBacktest(raw: any, reqBodyJson: any) {
       ? raw.equityCurve
       : [];
 
-  // convert trade return_pct to decimals if needed
   const trades = tradesRaw.map((t: any) => ({
     entry_date: String(t.entry_date ?? ""),
     entry_price: n(t.entry_price),
@@ -109,7 +98,6 @@ function normalizeBacktest(raw: any, reqBodyJson: any) {
     return_pct: toDecimalPct(t.return_pct),
   }));
 
-  // params: prefer the ones we sent in the request body
   let threshold = Number(reqBodyJson?.threshold);
   if (!isFinite(threshold)) {
     threshold = Number(pick(raw?.params?.threshold, raw?.threshold, 0));
@@ -118,7 +106,6 @@ function normalizeBacktest(raw: any, reqBodyJson: any) {
     ? Number(reqBodyJson?.hold_days)
     : Number(pick(raw?.params?.hold_days, raw?.hold_days, 0));
 
-  // metrics inputs
   const initial_equity = n(pick(raw?.metrics?.initial_equity, raw?.equity_start, 1000));
   const final_equity = n(
     pick(
@@ -131,7 +118,6 @@ function normalizeBacktest(raw: any, reqBodyJson: any) {
   const win_rate =
     n(pick(raw?.metrics?.win_rate, raw?.win_rate_pct, 0), 4) / (raw?.metrics?.win_rate ? 1 : 100);
 
-  // annualized return from start/end dates if available
   const startStr = raw?.start ?? "";
   const endStr = raw?.end ?? "";
   let annualized_return = 0;
@@ -147,7 +133,6 @@ function normalizeBacktest(raw: any, reqBodyJson: any) {
 
   const max_drawdown = computeMaxDrawdown(equity_curve);
 
-  // price_series: fill from preview if backend included it, else empty
   const price_series =
     Array.isArray(raw?.price_series) && raw.price_series.length
       ? raw.price_series
@@ -155,16 +140,16 @@ function normalizeBacktest(raw: any, reqBodyJson: any) {
       ? raw.preview.map((p: any) => ({ date: String(p.date ?? ""), close: n(p.close) }))
       : [];
 
-  const normalized = {
+  return {
     symbol: String(raw?.symbol ?? ""),
     start: startStr,
     end: endStr,
     params: { threshold, hold_days },
     metrics: {
       total_pnl,
-      win_rate,               // fraction 0–1
-      annualized_return,      // fraction 0–1
-      max_drawdown,           // fraction 0–1
+      win_rate,
+      annualized_return,
+      max_drawdown,
       final_equity,
       initial_equity,
     },
@@ -173,15 +158,12 @@ function normalizeBacktest(raw: any, reqBodyJson: any) {
     price_series,
     note: raw?.detail || raw?.note,
   };
-
-  return normalized;
 }
 
 api.interceptors.response.use(
   (response) => {
     try {
       const url = String(response?.config?.url || "");
-      // parse original request body (so we can retain threshold/hold_days)
       let reqBodyJson: any = undefined;
       try {
         reqBodyJson =
@@ -189,7 +171,6 @@ api.interceptors.response.use(
             ? JSON.parse(response.config.data)
             : response?.config?.data;
       } catch {}
-
       if (url.endsWith("/peek")) {
         response.data = normalizePeek(response.data ?? {});
       } else if (url.endsWith("/backtest")) {
@@ -209,7 +190,7 @@ api.interceptors.response.use(
 
 try { console.info("[api] baseURL =", BASE); } catch {}
 
-/* ========= YOUR TYPES & UI (unchanged) ========= */
+/* ========= TYPES ========= */
 
 type PeekResponse = {
   symbol: string; start: string; end: string;
@@ -238,7 +219,7 @@ type BacktestResponse = {
   note?: string;
 };
 
-/* ======= rest of your original component remains unchanged ======= */
+/* ========= UI HELPERS ========= */
 
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
 const fmtDate = (iso: string) => new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric"}).format(new Date(iso));
@@ -255,7 +236,7 @@ const fmtSignedMoney2 = (v:number) => {
 type ChartMode = "equity" | "price";
 type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 
-/* -------------------- FULL APP COMPONENT -------------------- */
+/* ========================= APP ========================= */
 
 export default function App() {
   const today = new Date();
@@ -264,10 +245,10 @@ export default function App() {
   const startDefault = new Date(yday); startDefault.setDate(yday.getDate()-120);
   const startISO = startDefault.toISOString().slice(0,10);
 
-  // START EMPTY: no symbol preselected; dates blank until user picks.
-  const [symbol, setSymbol] = useState("");
-  const [start, setStart]   = useState<string>("");
-  const [end, setEnd]       = useState<string>("");
+  // CHANGE 1: no default symbol; keep your convenient default dates
+  const [symbol, setSymbol] = useState<string>("");     // was "SPY"
+  const [start, setStart]   = useState<string>(startISO);
+  const [end, setEnd]       = useState<string>(ydayISO);
   const [threshold, setThreshold] = useState<string>("");
   const [holdDays, setHoldDays]   = useState<string>("4");
 
@@ -294,14 +275,8 @@ export default function App() {
     } catch {}
   }, []);
 
-  useEffect(() => {
-    if (end && end > ydayISO) setEnd(ydayISO);
-  }, [end, ydayISO]);
+  useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
 
-  const hasSymbol  = symbol.trim().length > 0;
-  const hasStart   = start.trim().length > 0;
-  const hasEnd     = end.trim().length > 0;
-  const datesValid = !hasStart || !hasEnd || start <= end; // if both set, enforce start<=end
   const parseThreshold = (): number | null => {
     if (threshold.trim() === "") return null;
     const v = Number(threshold);
@@ -313,49 +288,22 @@ export default function App() {
     return Number.isInteger(n) && n >= 1 ? n : null;
   };
 
-  const canPeek     = hasSymbol && datesValid;
-  const thrInvalid  = threshold.trim() !== "" && parseThreshold() === null;
-  const hdInvalid   = holdDays.trim()   !== "" && parseHoldDays() === null;
-  const canBacktest = canPeek && !thrInvalid && !hdInvalid;
+  const canPeek = symbol.trim().length > 0;
 
   const doPeek = async () => {
-    setError(null);
-    setResult(null);
-    setPeekBusy(true);
-    setLoading(true);
+    setError(null); setResult(null);
+    setPeekBusy(true); setLoading(true);
     try {
-      const payload: any = { symbol };
-      if (hasStart) payload.start = start;
-      if (hasEnd)   payload.end   = end;
-
-      const res = await api.post<PeekResponse>("/peek", payload);
-
-      // Ensure all the numeric fields exist (even if backend returns partial data)
-      const data = {
-        ...res.data,
-        min_close: safeNum(res.data?.min_close, 0),
-        median_close: safeNum(res.data?.median_close, 0),
-        max_close: safeNum(res.data?.max_close, 0),
-        suggested_threshold: safeNum(res.data?.suggested_threshold, 0),
-        rows: safeNum(res.data?.rows, Array.isArray(res.data?.preview) ? res.data.preview.length : 0),
-        preview: Array.isArray(res.data?.preview) ? res.data.preview : [],
-        symbol: String(res.data?.symbol ?? symbol),
-        start: String(res.data?.start ?? start),
-        end: String(res.data?.end ?? end),
-      };
-
-      setPeek(data);
-
-      // Only set threshold input if we have a valid number
-      const sug = safeNum(data.suggested_threshold, NaN);
-      if (Number.isFinite(sug)) setThreshold(sug.toFixed(2));
-    } catch (e: any) {
+      // CHANGE 2 (safe): you were already sending start/end; keep it unchanged
+      const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
+      setPeek(res.data);
+      if (Number.isFinite(res.data?.suggested_threshold)) {
+        setThreshold(res.data.suggested_threshold.toFixed(2));
+      }
+    } catch (e:any) {
       setError(e?.response?.data?.detail ?? e.message);
       setPeek(null);
-    } finally {
-      setPeekBusy(false);
-      setLoading(false);
-    }
+    } finally { setPeekBusy(false); setLoading(false); }
   };
 
   const doBacktest = async () => {
@@ -365,12 +313,7 @@ export default function App() {
       const hd  = parseHoldDays();
       if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
       if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
-
-      const payload: any = { symbol, threshold: thr, hold_days: hd };
-      if (hasStart) payload.start = start;
-      if (hasEnd)   payload.end   = end;
-
-      const res = await api.post<BacktestResponse>("/backtest", payload);
+      const res = await api.post<BacktestResponse>("/backtest", {symbol, start, end, threshold: thr, hold_days: hd});
       setResult(res.data);
     } catch (e:any) {
       setError(e?.response?.data?.detail ?? e.message);
@@ -423,6 +366,9 @@ export default function App() {
     return new Intl.DateTimeFormat("en-US",{year:"numeric", month:"2-digit"}).format(d);
   };
 
+  const thrInvalid = threshold.trim() !== "" && parseThreshold() === null;
+  const hdInvalid  = holdDays.trim() !== "" && parseHoldDays() === null;
+
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d=>d==="asc"?"desc":"asc");
     else { setSortKey(key); setSortDir("asc"); }
@@ -464,14 +410,8 @@ export default function App() {
               <input className="input" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} list="symbols" placeholder="e.g. AAPL"/>
               <datalist id="symbols">{PRESETS.map(s => <option key={s} value={s} />)}</datalist>
             </label>
-            <label className="text-sm">
-              <div className="mb-1 text-slate-300">Start</div>
-              <input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} max={ydayISO} placeholder="YYYY-MM-DD"/>
-            </label>
-            <label className="text-sm">
-              <div className="mb-1 text-slate-300">End</div>
-              <input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} max={ydayISO} placeholder="YYYY-MM-DD"/>
-            </label>
+            <label className="text-sm"><div className="mb-1 text-slate-300">Start</div><input className="input" type="date" value={start} onChange={e=>setStart(e.target.value)} max={ydayISO}/></label>
+            <label className="text-sm"><div className="mb-1 text-slate-300">End</div><input className="input" type="date" value={end} onChange={e=>setEnd(e.target.value)} max={ydayISO}/></label>
           </div>
 
           <div className="flex flex-wrap gap-3 mt-4">
@@ -488,9 +428,8 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-bold tracking-tight text-bull-400">{peek.symbol} Market Snapshot</h3>
-                <div className="text-sm text-slate-400">
-                  {fmtDate((start || peek.start))} – {fmtDate((end || peek.end))}
-                </div>
+                {/* Keep your backend-provided dates exactly */}
+                <div className="text-sm text-slate-400">{fmtDate(peek.start)} – {fmtDate(peek.end)}</div>
               </div>
               <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
             </div>
@@ -518,7 +457,7 @@ export default function App() {
                 <input className={"input " + (hdInvalid ? "ring-2 ring-bear-500" : "")} inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={e=>setHoldDays(e.target.value)} placeholder=">= 1"/>
               </label>
               <div className="sm:col-span-2">
-                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canBacktest}>Run Backtest</button>
+                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canPeek}>Run Backtest</button>
               </div>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-[13px] leading-6">
@@ -539,7 +478,7 @@ export default function App() {
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-2xl font-bold tracking-tight text-bull-400">Backtest Results</h3>
                 <div className="flex items-center gap-2 text-sm text-slate-400">
-                  {fmtDate((start || result.start))} – {fmtDate((end || result.end))} • {result.symbol}
+                  {fmtDate(result.start)} – {fmtDate(result.end)} • {result.symbol}
                   <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
                     <button className={"px-3 py-1 rounded-md " + (mode==="equity" ? "bg-bull-600 text-white" : "text-slate-200")} onClick={()=>setMode("equity")}>Equity</button>
                     <button className={"px-3 py-1 rounded-md " + (mode==="price" ? "bg-bull-600 text-white" : "text-slate-200")} onClick={()=>setMode("price")}>Price</button>
@@ -608,21 +547,19 @@ export default function App() {
               </div>
             </div>
 
-            {/* Trades panel */}
+            {/* Trades panel: CHANGE 3 – remove flex-grow/min-height so it doesn't leave empty space */}
             <div className="flex flex-col">
               <div className="card p-6">
                 <div className="flex items-center justify-center mb-4">
                   <h3 className="text-2xl font-bold tracking-tight text-bull-400">Trades ({tradesWithBars.length})</h3>
                 </div>
 
-                {/* centered KPI row */}
                 <div className="flex flex-wrap justify-center gap-3 mb-5">
                   <Kpi label="Best Trade"  value={fmtSignedMoney2(kpis.best)}  tone={kpis.best>=0 ? "bull" : "bear"} sub="USD" />
                   <Kpi label="Worst Trade" value={fmtSignedMoney2(kpis.worst)} tone={kpis.worst>=0 ? "bull" : "bear"} sub="USD" />
                   <Kpi label="Hold Period" value={(result?.params?.hold_days ?? Number(holdDays)).toString() + " days"} tone="muted" />
                 </div>
 
-                {/* Vertical per-trade columns */}
                 <div className="overflow-x-auto">
                   <div className="grid auto-cols-[210px] grid-flow-col gap-4">
                     {tradesWithBars.map((t, i) => {
@@ -637,7 +574,7 @@ export default function App() {
                               <span>PnL</span><span className="tabular-nums">{(positive?"+":"") + t.pnl.toFixed(2)}</span>
                             </div>
                             <div className={"flex justify-between " + (positive ? "text-emerald-300" : "text-rose-300")}>
-                              <span>Return</span><span className="tabular-nums">{(positive?"+":"") + (t.return_pct*100).toFixed(2)}%</span>
+                              <span>Return</span><span className="tabular-nums">{(t.return_pct*100).toFixed(2)}%</span>
                             </div>
                             <div className="flex justify-between"><span>Bars</span><span className="tabular-nums">{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</span></div>
                             <div className="flex justify-end">
@@ -685,8 +622,7 @@ function Kpi({
     <div className="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 w-[180px] text-center">
       <div className="text-[11px] text-slate-400 whitespace-nowrap">{label}</div>
       <div className={`text-lg font-semibold tabular-nums ${toneClass} whitespace-nowrap`}>{value}</div>
-      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>
-      }
+      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>}
     </div>
   );
 }
