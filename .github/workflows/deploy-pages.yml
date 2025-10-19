@@ -29,11 +29,13 @@ jobs:
             cache-dependency-path: frontend/package-lock.json
 
 
-      - name: Install deps
+      - name: Install deps (clean fix for Rollup)
         run: |
-          npm cache clean --force
-          npm install
+            rm -rf node_modules package-lock.json
+            npm cache clean --force
+            npm install
         working-directory: frontend
+
 
       - name: Build
         run: npm run build
