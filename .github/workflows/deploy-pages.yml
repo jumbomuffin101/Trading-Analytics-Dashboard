@@ -28,17 +28,17 @@ jobs:
           cache: npm
 
       - name: Install deps
-        run: npm ci
+        run: |
+          npm cache clean --force
+          npm install
         working-directory: frontend
 
       - name: Build
         run: npm run build
         working-directory: frontend
         env:
-          # Use ONE of these two approaches:
-          # 1) If you added a secret:
           VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
-          # 2) If you rely on frontend/.env.production, delete the line above.
+
 
       - name: SPA 404 fallback
         run: cp frontend/dist/index.html frontend/dist/404.html
