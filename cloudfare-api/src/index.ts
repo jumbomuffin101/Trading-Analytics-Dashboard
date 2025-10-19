@@ -2,7 +2,7 @@
 
 type Json = Record<string, unknown> | unknown[];
 
-const ORIGIN = "https://jumbomuffin101.github.io/ssmif-quant-dev/";
+const ORIGIN = "https://jumbomuffin101.github.io";
 function corsHeaders(origin = ORIGIN) {
   return {
     "access-control-allow-origin": origin,
