@@ -5,7 +5,7 @@ import {
   LineChart, Line, ReferenceLine, ReferenceDot, Label
 } from "recharts";
 import DrawdownChart from "./components/DrawdownChart";
-import { exportTradesCSV } from "./utils/csv";
+// ❌ Removed: import { exportTradesCSV } from "./utils/csv";
 import "./index.css";
 
 /* ========== API + Normalizers ========== */
@@ -292,6 +292,56 @@ export default function App() {
       </div>
 
       <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
+        {/* =================== Documentation =================== */}
+        <div className="card p-6 sm:p-7">
+          <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Documentation</h3>
+          <div className="text-sm text-slate-300 mt-2 leading-6">
+            <p className="mb-3">
+              This app runs a simple long-only <span className="font-semibold">price-threshold breakout</span> strategy on a single symbol.
+              The logic is intentionally minimal so you can focus on the data flow and metrics.
+            </p>
+            <div className="grid md:grid-cols-2 gap-5">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                <div className="font-semibold text-slate-200 mb-1">Rules of the strategy</div>
+                <ul className="list-disc ml-5 space-y-1">
+                  <li><span className="font-medium">Entry:</span> Go <span className="font-semibold">long</span> on the first close that <span className="font-semibold">crosses above</span> the configured <em>Threshold</em> after being at or below it.</li>
+                  <li><span className="font-medium">Positioning:</span> One position at a time (no pyramiding). New entries are ignored until the open position exits.</li>
+                  <li><span className="font-medium">Exit:</span> Hold for <em>N</em> trading days (<em>Hold&nbsp;Days</em>) and exit at that day’s close (fixed-horizon exit; no stop/TP by default).</li>
+                  <li><span className="font-medium">Equity model:</span> Cash-only equity that changes on exit days by realized P&amp;L. No compounding via position sizing is modeled here.</li>
+                  <li><span className="font-medium">Data basis:</span> Daily OHLCV. “Peek” computes descriptive stats and a <em>Suggested Threshold</em> (75th percentile of closes) to help choose a reasonable breakout level.</li>
+                </ul>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                <div className="font-semibold text-slate-200 mb-1">Interpreting outputs</div>
+                <ul className="list-disc ml-5 space-y-1">
+                  <li><span className="font-medium">Equity Curve:</span> Steps only on exit bars; flat between exits.</li>
+                  <li><span className="font-medium">Profit &amp; Loss:</span> Sum of all realized trade P&amp;L (USD).</li>
+                  <li><span className="font-medium">Win Rate / Profit Factor:</span> Hit rate and reward/risk quality (see Optimizer Insights).</li>
+                  <li><span className="font-medium">Max Drawdown:</span> Worst peak-to-trough on the equity curve (fractional).</li>
+                  <li><span className="font-medium">Annualized Return:</span> CAGR using initial and final equity over the tested span.</li>
+                </ul>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+              <div className="font-semibold text-slate-200 mb-1">Assumptions &amp; limitations</div>
+              <ul className="list-disc ml-5 space-y-1">
+                <li>No transaction costs, slippage, or borrow constraints.</li>
+                <li>Executions are assumed at the close price on entry/exit days.</li>
+                <li>Threshold is treated as a hard level; intraday crosses aren’t modeled (daily close basis).</li>
+                <li>Single concurrent position; no leverage or scaling.</li>
+              </ul>
+            </div>
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+              <div className="font-semibold text-slate-200 mb-1">How to use</div>
+              <ol className="list-decimal ml-5 space-y-1">
+                <li>Choose a symbol and date range, then click <span className="font-medium">Peek</span> to view descriptive stats and a suggested threshold.</li>
+                <li>Set <span className="font-medium">Threshold</span> and <span className="font-medium">Hold&nbsp;Days</span> and click <span className="font-medium">Run Backtest</span>.</li>
+                <li>Inspect equity/price views, read <span className="font-medium">Optimizer Insights</span> for actionable tweaks, and iterate.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
         {/* Peek & symbols */}
         <div className="card p-6 sm:p-7">
           <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Peek &amp; Symbols</h3>
@@ -402,19 +452,7 @@ export default function App() {
                 <button className="btn-primary" onClick={doBacktest} disabled={loading || !canPeek}>
                   Run Backtest
                 </button>
-                {result?.trades?.length ? (
-                  <button
-                    className="btn-ghost"
-                    onClick={() =>
-                      exportTradesCSV(
-                        tradesWithBars as any,
-                        `${result.symbol}_${result.start}_${result.end}_trades.csv`
-                      )
-                    }
-                  >
-                    Export CSV
-                  </button>
-                ) : null}
+                {/* ❌ Removed Export CSV button and handler */}
               </div>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-[13px] leading-6">
