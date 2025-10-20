@@ -17,6 +17,18 @@ class Trade:
 # ---------------------------
 # Entry builders (boolean Series)
 # ---------------------------
+def meanrev_drop_entries(df: pd.DataFrame, drop_pct: float) -> pd.Series:
+    """
+    Enter long on ANY bar where today's close <= prior close * (1 - drop_pct%).
+    - drop_pct is in percent (e.g., 2.0 means -2% or worse vs prior close)
+    - Returns a boolean Series aligned to df.index
+    """
+    c = pd.to_numeric(df["close"], errors="coerce").astype(float)
+    prev = c.shift(1)
+    thresh = prev * (1.0 - float(drop_pct) / 100.0)
+    ent = (c <= thresh)
+    return ent.fillna(False)
+
 def breakout_entries(df: pd.DataFrame, threshold: float) -> pd.Series:
     """
     True on bars where a NEW trade opens:
