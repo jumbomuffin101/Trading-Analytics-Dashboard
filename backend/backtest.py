@@ -1,6 +1,6 @@
 # backend/backtest.py
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import List, Dict, Any
 import pandas as pd
 import numpy as np
@@ -15,16 +15,15 @@ class Trade:
     return_pct: float
 
 def run_backtest(
-    df: pd.DataFrame,               # expects ['open','high','low','close'] and DatetimeIndex
+    df: pd.DataFrame,  # expects ['open','high','low','close'] and DatetimeIndex
     threshold: float,
     hold_days: int,
     initial_equity: float = 100_000.0,
 ) -> Dict[str, Any]:
     """
-    UPDATED STRATEGY (more trades):
-      - Enter while FLAT on any day the close >= threshold (no cross requirement).
-      - Hold for N business days, one position at a time (1 share per trade).
-      - Exit strictly after N bars; allow immediate re-entry next signal.
+    Strategy:
+      - Enter on a 'cross up': prev close <= threshold AND today close > threshold
+      - Hold for N business days, one position at a time (1 share per trade)
     Equity:
       - Starts at initial_equity
       - Adds raw PnL (exit_px - entry_px) on exit dates
@@ -44,29 +43,27 @@ def run_backtest(
             "trade_count": 0,
         }
 
-    df = df.copy().sort_index()
+    df = df.copy()
+    df = df.sort_index()
     df["date"] = df.index.strftime("%Y-%m-%d")
+    df["prev_close"] = df["close"].shift(1)
+    df["cross_up"] = (df["prev_close"] <= threshold) & (df["close"] > threshold)
 
-    # --------- CHANGE: "any touch/above" instead of cross-up ----------
-    df["signal"] = df["close"] >= float(threshold)
-    # ------------------------------------------------------------------
-
-    dates  = df["date"].tolist()
-    closes = df["close"].astype(float).tolist()
+    dates = df["date"].tolist()
+    closes = df["close"].tolist()
 
     trades: List[Trade] = []
     i = 0
     n = len(df)
-
-    # One position at a time; while flat, enter whenever signal is true
     while i < n:
-        if bool(df["signal"].iloc[i]):
+        if bool(df["cross_up"].iloc[i]):
             entry_idx = i
-            exit_idx  = min(i + hold_days, n - 1)   # strict fixed-horizon exit
-            entry_px  = float(closes[entry_idx])
-            exit_px   = float(closes[exit_idx])
-            pnl       = exit_px - entry_px
-            ret       = (pnl / entry_px) if entry_px else 0.0
+            # hold_days counts business bars, not calendar
+            exit_idx = min(i + hold_days, n - 1)
+            entry_px = float(closes[entry_idx])
+            exit_px = float(closes[exit_idx])
+            pnl = exit_px - entry_px             # 1 share PnL
+            ret = pnl / entry_px if entry_px else 0.0
             trades.append(
                 Trade(
                     entry_date=dates[entry_idx],
@@ -77,7 +74,6 @@ def run_backtest(
                     return_pct=float(ret),
                 )
             )
-            # Skip the bars while we're in the position; allow immediate re-entry after exit
             i = exit_idx + 1
         else:
             i += 1
@@ -87,12 +83,14 @@ def run_backtest(
     for t in trades:
         pnl_by_exit[t.exit_date] = pnl_by_exit.get(t.exit_date, 0.0) + t.pnl
 
+    # full span regardless of trades; ensures short ranges draw correctly
     span_start = df.index[0]
     span_end   = df.index[-1]
     idx = pd.date_range(span_start, span_end, freq="B")
 
     eq = float(initial_equity)
     rows = []
+    # write an initial point on the first business day so the chart starts at initial_equity
     first_point_written = False
     for d in idx:
         dstr = d.strftime("%Y-%m-%d")
@@ -103,10 +101,11 @@ def run_backtest(
         if pnl_today != 0.0:
             eq += pnl_today
         rows.append({"date": dstr, "equity": eq})
-
     equity_df = pd.DataFrame(rows).drop_duplicates(subset=["date"], keep="last")
+
     final_equity = float(equity_df["equity"].iloc[-1]) if not equity_df.empty else initial_equity
 
+    # Max drawdown
     def _mdd(series: pd.Series) -> float:
         if series.empty:
             return 0.0
@@ -116,6 +115,7 @@ def run_backtest(
 
     max_drawdown = _mdd(equity_df["equity"]) if not equity_df.empty else 0.0
 
+    # Annualized return based on first & last dates in the span
     if not equity_df.empty:
         d0 = pd.to_datetime(equity_df["date"].iloc[0])
         d1 = pd.to_datetime(equity_df["date"].iloc[-1])
@@ -129,11 +129,8 @@ def run_backtest(
     win_rate = float(np.mean([1.0 if t.pnl > 0 else 0.0 for t in trades])) if trades else 0.0
     avg_trade_return = float(np.mean([t.return_pct for t in trades])) if trades else 0.0
 
-    # Convert dataclasses -> dicts (safer JSON)
-    trades_out = [asdict(t) for t in trades]
-
     return {
-        "trades": trades_out,
+        "trades": trades,
         "equity_df": equity_df,
         "total_pnl": total_pnl,
         "win_rate": win_rate,
@@ -142,5 +139,5 @@ def run_backtest(
         "final_equity": final_equity,
         "initial_equity": float(initial_equity),
         "avg_trade_return": avg_trade_return,
-        "trade_count": len(trades_out),
+        "trade_count": len(trades),
     }
