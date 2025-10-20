@@ -3,7 +3,7 @@ import axios from "axios";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   LineChart, Line, ReferenceLine, ReferenceDot, Label
-} from "recharts"; // ⬅️ Brush removed
+} from "recharts";
 import DrawdownChart from "./components/DrawdownChart";
 import "./index.css";
 
@@ -185,7 +185,7 @@ const PALETTE = {
   threshold: "var(--accent)",
 };
 
-/* ======= Small UI helpers: Spinner, Error, Skeleton ======= */
+/* ======= Small UI helpers ======= */
 function Spinner({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" className="animate-spin inline-block align-[-2px]">
@@ -217,6 +217,38 @@ function SkeletonCard() {
   );
 }
 
+/* ======= Top Tabs ======= */
+const SECTIONS = [
+  { id: "docs", label: "Docs" },
+  { id: "peek", label: "Peek" },
+  { id: "strategy", label: "Strategy" },
+  { id: "results", label: "Results" },
+  { id: "trades", label: "Trades" },
+  { id: "drawdown", label: "Drawdown" },
+] as const;
+
+function TabBar() {
+  const scrollTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  return (
+    <div className="sticky top-0 z-20 bg-[var(--bg)]/80 backdrop-blur border-b border-[var(--border)]">
+      <div className="mx-auto max-w-6xl px-4 py-2 flex flex-wrap gap-2">
+        {SECTIONS.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => scrollTo(id)}
+            className="px-3 py-1.5 rounded-lg text-sm border border-[var(--border)] bg-[var(--panel)] hover:border-[var(--accent)] transition"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ========== Main App ========== */
 export default function App() {
   const today = new Date();
@@ -240,7 +272,7 @@ export default function App() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
 
-  // NEW: strategy selector + contextual params
+  // strategy selector + params
   const [strategy, setStrategy] = useState<StrategyKey>("breakout");
   const [fast, setFast] = useState("10");
   const [slow, setSlow] = useState("30");
@@ -364,21 +396,33 @@ export default function App() {
           </div>
         </div>
 
-        <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
+        {/* Sticky top navigation tabs */}
+        <TabBar />
+
+        <div className="mx-auto max-w-6xl px-4 pt-6 pb-10 space-y-8">
           {/* =================== Documentation =================== */}
-          <div className="card p-6 sm:p-7">
+          <div id="docs" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
             <p className="text-sm text-[var(--text)]/80 mt-2 leading-6">
-              Pick a symbol and dates, hit <strong>Peek</strong> for quick stats and a suggested threshold.
-              Choose a <strong>Strategy</strong> and set its parameters, then run the <strong>Backtest</strong>.
-              Review the equity/price charts, trades, and metrics below. Green values indicate favorable results,
-              red indicate unfavorable. Use the <strong>Optimizer Insights</strong> for quick, strategy-aware
-              tweaks to improve performance.
+              This tool lets you explore simple daily-close strategies on any symbol with a clean,
+              reproducible workflow. Start by selecting a ticker and date range, then click <strong>Peek</strong> to
+              fetch a lightweight snapshot of prices and distribution stats, including a <em>suggested threshold</em> for
+              breakout tests. Next, pick a <strong>Strategy</strong>—a threshold <em>Breakout</em>, a <em>Simple Moving
+              Average Crossover</em>, or a short-horizon <em>Mean Reversion</em>—and enter its parameters. Hit
+              <strong> Run Backtest</strong> to build an equity curve (cash-only, one position at a time), inspect trade cards or
+              a sortable table, and review key metrics such as P&amp;L, annualized return, win rate, drawdown, and
+              expectancy. The equity chart steps only on exit days (realized P&amp;L); the price chart overlays entries and
+              exits plus any relevant reference level (e.g., your threshold). Values that are generally favorable are shown
+              in <span className="text-up font-semibold">green</span> (e.g., positive P&amp;L, higher hit rate), while unfavorable readings appear in
+              <span className="text-down font-semibold"> red</span> (e.g., negative expectancy, larger drawdowns). Use <strong>Optimizer Insights</strong> to get quick,
+              strategy-aware suggestions and parameter sweeps (e.g., threshold ±2–5%, SMA pairs like 5/20/50, or 1–4% drop
+              for mean reversion). Nothing is assumed about fees, slippage, or leverage; fills are on daily closes, and
+              intraday behavior is not modeled. Keep tests simple, compare across symbols or periods, and iterate.
             </p>
           </div>
 
           {/* Peek & symbols */}
-          <div className="card p-6 sm:p-7">
+          <div id="peek" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Peek &amp; Symbols</h3>
             <div className="text-xs text-[var(--muted)] mt-1 mb-3">Type or pick a symbol, choose dates, and click Peek.</div>
 
@@ -456,7 +500,7 @@ export default function App() {
           )}
 
           {/* Strategy & Parameters (dynamic) */}
-          <div className="card p-6 sm:p-7">
+          <div id="strategy" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy & Parameters</h3>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
@@ -568,7 +612,7 @@ export default function App() {
           {/* Backtest Results */}
           {result && (
             <>
-              <div className="grid lg:grid-cols-3 gap-8 items-stretch">
+              <div id="results" className="grid lg:grid-cols-3 gap-8 items-stretch">
                 <div className="card p-6 lg:col-span-2 flex flex-col relative">
                   {loading && (
                     <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center rounded-xl z-10">
@@ -688,7 +732,7 @@ export default function App() {
                 </div>
 
                 {/* Trades + Optimizer */}
-                <div className="flex flex-col h-full">
+                <div id="trades" className="flex flex-col h-full">
                   <div className="card p-6 mb-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">
@@ -780,7 +824,9 @@ export default function App() {
                 </div>
               </div>
 
-              <DrawdownChart equity={result.equity_curve} />
+              <div id="drawdown">
+                <DrawdownChart equity={result.equity_curve} />
+              </div>
             </>
           )}
 
