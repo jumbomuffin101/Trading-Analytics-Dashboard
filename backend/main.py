@@ -1,15 +1,4 @@
-# backend/main.py
-from __future__ import annotations
-
-from typing import Dict, Tuple, List, Any
-from datetime import datetime, timezone
-
-import numpy as np
-import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-
-from ingester import fetch_prices
+# ... keep the rest of your file the same (imports etc.)
 from backtest import (
     run_backtest,
     run_backtest_stacking,
@@ -17,141 +6,8 @@ from backtest import (
     sma_entries,
     meanrev_entries,
 )
-from database import init_db, read_prices, upsert_prices
 
-app = FastAPI(title="SSMIF Quant Backend")
-
-# CORS for local Vite dev
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Ensure DB tables exist
-init_db()
-
-# Simple in-memory cache: (symbol, start, end) -> (timestamp, df, source)
-_PRICE_CACHE: Dict[Tuple[str, str, str], Tuple[float, pd.DataFrame, str]] = {}
-_PRICE_TTL_SECONDS = 15 * 60  # 15 minutes
-
-
-def _now_ts() -> float:
-    return datetime.now(timezone.utc).timestamp()
-
-
-def _df_from_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
-    """Convert DB rows -> DataFrame with DateTimeIndex."""
-    if not rows:
-        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-    df = pd.DataFrame(rows)
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.set_index("date").sort_index()
-    return df
-
-
-def _ensure_db_has_range(symbol: str, start: str, end: str) -> str:
-    """
-    Make sure DB has [start, end] for `symbol`.
-    We fetch from Yahoo Finance (no fallback) and upsert into DB.
-    Returns the source string used.
-    """
-    df, source = fetch_prices(symbol, start, end, prefer="yahoo", allow_fallback=False)
-    if df.empty:
-        raise HTTPException(
-            status_code=429,
-            detail="Yahoo Finance temporarily unavailable for this range.",
-        )
-
-    rows = []
-    for ts, row in df.iterrows():
-        rows.append(
-            {
-                "date": str(pd.to_datetime(ts).date()),
-                "open": float(row.get("open", np.nan)) if "open" in row else None,
-                "high": float(row.get("high", np.nan)) if "high" in row else None,
-                "low": float(row.get("low", np.nan)) if "low" in row else None,
-                "close": float(row["close"]),
-                "volume": float(row.get("volume", np.nan)) if "volume" in row else None,
-            }
-        )
-
-    upsert_prices(symbol, rows, "Yahoo Finance")
-    return "Yahoo Finance"
-
-
-def _get_prices_cached(symbol: str, start: str, end: str) -> Tuple[pd.DataFrame, str]:
-    """Fetch from cache/DB; if DB missing, ingest from Yahoo then read."""
-    key = (symbol.upper(), start, end)
-    now = _now_ts()
-
-    if key in _PRICE_CACHE:
-        ts, df, src = _PRICE_CACHE[key]
-        if now - ts <= _PRICE_TTL_SECONDS:
-            return df.copy(), src
-
-    src = _ensure_db_has_range(symbol, start, end)
-    rows = read_prices(symbol, start, end)
-    if not rows:
-        raise HTTPException(status_code=404, detail="No data in DB after ingest.")
-    df = _df_from_rows(rows)
-
-    _PRICE_CACHE[key] = (now, df.copy(), src)
-    return df, src
-
-
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-
-@app.post("/peek")
-async def peek_post(req: Request):
-    data = await req.json()
-    symbol = data.get("symbol")
-    start = data.get("start")
-    end = data.get("end")
-    if not (symbol and start and end):
-        raise HTTPException(status_code=400, detail="symbol, start, end are required")
-
-    df, _src = _get_prices_cached(symbol, start, end)
-    if "close" not in df.columns or df["close"].empty:
-        raise HTTPException(status_code=404, detail="No closes in range.")
-
-    closes = df["close"].astype(float).to_numpy()
-    min_close = float(np.min(closes))
-    median_close = float(np.median(closes))
-    max_close = float(np.max(closes))
-    suggested_threshold = float(np.percentile(closes, 75))
-
-    tail = df.tail(40).copy()
-    preview: List[Dict[str, Any]] = []
-    for ts, row in tail.iterrows():
-        preview.append(
-            {
-                "date": pd.to_datetime(ts).strftime("%Y-%m-%d"),
-                "open": float(row.get("open", np.nan)) if "open" in row else None,
-                "high": float(row.get("high", np.nan)) if "high" in row else None,
-                "low": float(row.get("low", np.nan)) if "low" in row else None,
-                "close": float(row["close"]),
-            }
-        )
-
-    return {
-        "symbol": symbol.upper(),
-        "start": start,
-        "end": end,
-        "min_close": round(min_close, 4),
-        "median_close": round(median_close, 4),
-        "max_close": round(max_close, 4),
-        "suggested_threshold": round(suggested_threshold, 4),
-        "rows": int(len(df)),
-        "preview": preview,
-        "source": "Yahoo Finance",
-    }
-
+# ...
 
 @app.post("/backtest")
 async def backtest_post(req: Request):
@@ -160,17 +16,17 @@ async def backtest_post(req: Request):
     start = data.get("start")
     end = data.get("end")
 
-    # strategy & params
+    # core params
     strategy = (data.get("strategy") or "breakout").lower()
     hold_days = data.get("hold_days")
-    stacking = bool(data.get("stacking", True))
+    stacking = bool(data.get("stacking", True))   # default ON
     position_size = float(data.get("position_size", 1.0))
 
-    # per-strategy params
-    threshold = data.get("threshold")           # breakout
-    fast = data.get("fast")                     # sma
+    # per-strategy params (with safe defaults to avoid "1 trade" symptom)
+    threshold = data.get("threshold")
+    fast = data.get("fast")
     slow = data.get("slow")
-    lookback = data.get("lookback")             # mean reversion
+    lookback = data.get("lookback")
     k_sigma = data.get("k_sigma")
 
     if not (symbol and start and end):
@@ -178,50 +34,63 @@ async def backtest_post(req: Request):
     if hold_days is None or not isinstance(hold_days, int) or hold_days < 1:
         raise HTTPException(status_code=400, detail="hold_days must be an integer >= 1")
 
-    # Ensure data present (and cached)
+    # Load data
     df, _src = _get_prices_cached(symbol, start, end)
     if "close" not in df.columns or df["close"].empty:
         raise HTTPException(status_code=404, detail="No closes in range.")
+    df = df.sort_index()
 
     # Dynamic initial equity
-    median_close = float(df["close"].median())
+    median_close = float(pd.to_numeric(df["close"], errors="coerce").astype(float).median())
     initial_equity = 5_000.0 if median_close <= 5_000.0 else 50_000.0
 
-    # Build entries and run
+    # ---- Build entries per strategy (defaults ensure LOTS of signals) ----
+    params_payload: Dict[str, Any] = {"hold_days": int(hold_days)}
+
     if strategy == "breakout":
         if threshold is None or not isinstance(threshold, (int, float)):
-            raise HTTPException(status_code=400, detail="threshold must be a number for breakout")
+            # auto: use 75th percentile like peek (gives several crosses in 5y SPY)
+            closes = pd.to_numeric(df["close"], errors="coerce").astype(float)
+            threshold = float(np.nanpercentile(closes.to_numpy(), 75))
+        params_payload["threshold"] = float(threshold)
+
         if stacking:
             entries = breakout_entries(df, float(threshold))
             result = run_backtest_stacking(
                 df, entries, int(hold_days), initial_equity=initial_equity, position_size=position_size
             )
         else:
-            # legacy single-position
-            result = run_backtest(
-                df, threshold=float(threshold), hold_days=int(hold_days), initial_equity=initial_equity
-            )
-
-        params_payload = {"threshold": float(threshold), "hold_days": int(hold_days)}
+            result = run_backtest(df, float(threshold), int(hold_days), initial_equity)
 
     elif strategy == "sma":
-        if not (isinstance(fast, int) and isinstance(slow, int) and fast > 0 and slow > 0 and fast < slow):
-            raise HTTPException(status_code=400, detail="sma needs fast<int>, slow<int>, and fast < slow")
+        # defaults chosen to guarantee ~dozens of crosses in 5y on daily data
+        if not (isinstance(fast, int) and fast > 0):
+            fast = 10
+        if not (isinstance(slow, int) and slow > 0):
+            slow = 20
+        if not (fast < slow):
+            fast, slow = min(fast, slow), max(fast, slow)
+            if fast == slow:
+                fast = max(5, slow - 5)
+        params_payload.update({"fast": int(fast), "slow": int(slow)})
+
         entries = sma_entries(df, int(fast), int(slow))
         result = run_backtest_stacking(
             df, entries, int(hold_days), initial_equity=initial_equity, position_size=position_size
         )
-        params_payload = {"fast": int(fast), "slow": int(slow), "hold_days": int(hold_days)}
 
     elif strategy in ("meanrev", "mean_reversion", "mean-reversion"):
-        if not (isinstance(lookback, int) and lookback > 1 and isinstance(k_sigma, (int, float))):
-            raise HTTPException(status_code=400, detail="mean_reversion needs lookback<int> and k_sigma<number>")
-        entries = meanrev_entries(df, int(lookback), float(k_sigma))
+        if not (isinstance(lookback, int) and lookback > 1):
+            lookback = 20
+        if not isinstance(k_sigma, (int, float)):
+            k_sigma = 1.0  # many signals
+        params_payload.update({"lookback": int(lookback), "k_sigma": float(k_sigma)})
+
+        entries = meanrev_entries(df, int(lookback), float(k_sigma), every_bar=True)
         result = run_backtest_stacking(
             df, entries, int(hold_days), initial_equity=initial_equity, position_size=position_size
         )
-        params_payload = {"lookback": int(lookback), "k_sigma": float(k_sigma), "hold_days": int(hold_days)}
-        strategy = "mean_reversion"  # normalize
+        strategy = "mean_reversion"
 
     else:
         raise HTTPException(status_code=400, detail="Unknown strategy. Use breakout | sma | mean_reversion")
@@ -245,9 +114,7 @@ async def backtest_post(req: Request):
     eq_df = result.get("equity_df")
     if isinstance(eq_df, pd.DataFrame) and not eq_df.empty:
         for _, row in eq_df.iterrows():
-            equity_curve_payload.append(
-                {"date": str(row["date"]), "equity": float(row["equity"])}
-            )
+            equity_curve_payload.append({"date": str(row["date"]), "equity": float(row["equity"])})
 
     # ---- Price series payload
     price_series_payload = [
@@ -265,10 +132,9 @@ async def backtest_post(req: Request):
     if "avg_trade_return" in result:
         avg_trade_return = float(result["avg_trade_return"])
     else:
-        avg_trade_return = (
-            sum(t["return_pct"] for t in trades_payload) / trade_count if trade_count else 0.0
-        )
+        avg_trade_return = (sum(t["return_pct"] for t in trades_payload) / trade_count) if trade_count else 0.0
 
+    debug = result.get("debug", {})
     metrics = {
         "total_pnl": total_pnl,
         "win_rate": win_rate,
@@ -278,6 +144,8 @@ async def backtest_post(req: Request):
         "initial_equity": float(initial_equity),
         "avg_trade_return": avg_trade_return,
         "trade_count": trade_count,
+        "signals_total": int(debug.get("signals_total", 0)),
+        "signals_kept": int(debug.get("signals_kept", 0)),
     }
 
     return {
