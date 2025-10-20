@@ -263,16 +263,6 @@ export default function App() {
     });
   }, [result, sortKey, sortDir, dateIndex]);
 
-  const kpis = useMemo(() => {
-    const count = tradesWithBars.length;
-    const totalPnL = tradesWithBars.reduce((s, x) => s + x.pnl, 0);
-    const wins = tradesWithBars.filter((x) => x.pnl > 0);
-    const winRate = count ? wins.length / count : 0;
-    const best = count ? Math.max(...tradesWithBars.map((x) => x.pnl)) : 0;
-    const worst = count ? Math.min(...tradesWithBars.map((x) => x.pnl)) : 0;
-    return { count, totalPnL, winRate, best, worst };
-  }, [tradesWithBars]);
-
   const avgTradeReturn = useMemo(() => {
     const t = result?.trades ?? [];
     return t.length ? t.reduce((s, x) => s + x.return_pct, 0) / t.length : 0;
@@ -305,7 +295,7 @@ export default function App() {
         {/* Peek & symbols */}
         <div className="card p-6 sm:p-7">
           <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Peek &amp; Symbols</h3>
-          <div className="text-xs text-slate-400 mt-1 mb-3">Pick a symbol, choose dates, and click Peek.</div>
+          <div className="text-xs text-slate-400 mt-1 mb-3">Type or pick a symbol, choose dates, and click Peek.</div>
 
           <div className="flex flex-wrap gap-2 mb-3">
             {PRESETS.map((sym) => (
@@ -471,7 +461,10 @@ export default function App() {
                         <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
                           <Label value="Equity ($)" angle={-90} position="insideLeft" offset={14} dx={-60} dy={30} fill="#94a3b8" />
                         </YAxis>
-                        <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }} formatter={(v: any) => [fmtMoney2(v as number), "Equity"]} />
+                        <Tooltip
+                          contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }}
+                          formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
+                        />
                         <Area type="monotone" dataKey="equity" stroke="#10b981" fill="url(#eqFill)" strokeWidth={2} />
                       </AreaChart>
                     ) : (
@@ -483,7 +476,10 @@ export default function App() {
                         <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
                           <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-20} fill="#94a3b8" />
                         </YAxis>
-                        <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }} formatter={(v: any) => [fmtMoney2(v as number), "Close"]} />
+                        <Tooltip
+                          contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }}
+                          formatter={(v: any) => [fmtMoney2(v as number), "Close"]}
+                        />
                         <Line type="monotone" dataKey="close" stroke="#60a5fa" dot={false} strokeWidth={2} />
                         <ReferenceLine y={Number(result?.params?.threshold ?? threshold) || undefined} stroke="#f59e0b" strokeDasharray="4 4" />
                         {(result?.trades ?? []).map((t, i) => (
@@ -621,7 +617,6 @@ function Th({ children, onClick }: { children: any; onClick?: () => void }) {
   return <th className="cursor-pointer" onClick={onClick}>{children}</th>;
 }
 
-/* ========== Optimizer Panel (vertical wide/short tiles) ========== */
 /* ========== Optimizer Panel (vertical tiles + real suggestions) ========== */
 function OptimizerPanel({
   result,
@@ -649,7 +644,7 @@ function OptimizerPanel({
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
   const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
-  // ---- REAL suggestions (no generic filler) ----
+  // ---- REAL suggestions ----
   const sugg: string[] = [];
   const mdd = result.metrics.max_drawdown;
   const ann = result.metrics.annualized_return;
@@ -675,8 +670,6 @@ function OptimizerPanel({
   if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) {
     sugg.push("Average bars exceed configured hold — verify date alignment or use a fixed-bars exit.");
   }
-
-  // Ensure at least two concrete actions
   if (sugg.length < 2) {
     sugg.push("Run a quick parameter sweep: test thresholds near the suggested level and hold days 2–5.");
   }
@@ -715,7 +708,6 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   const s = String(value);
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
 
-  // Keep rows short; value font adapts to length and screen size
   const valueSize =
     significantLen > 12
       ? "text-base sm:text-lg"
@@ -732,4 +724,3 @@ function MetricRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-
