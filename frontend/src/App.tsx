@@ -145,10 +145,9 @@ type StrategyKey = "breakout" | "sma_cross" | "mean_rev";
 
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
 
-/* ========= Big default symbol set (fallback). Add /public/symbols.json to load “pretty much every stock”. ========= */
+/* ========= Fallback symbols; /public/symbols.json (if present) is merged in ========= */
 const DEFAULT_SYMBOLS: string[] = [
-  // Core index & megacaps
-  "A","AA","AAPL","ABBV","ABNB","ABT","ACN","ADBE","ADI","ADM","ADP","ADSK","AEP","AIG","ALB","ALL","AMAT","AMD","AMGN","AMP","AMT","AMZN","ANET","ANTM","APA","APD","APH","ASML","ATVI","AVGO","AXP",
+  "A","AA","AAPL","ABBV","ABNB","ABT","ACN","ADBE","ADI","ADM","ADP","ADSK","AEP","AIG","ALB","ALL","AMAT","AMD","AMGN","AMP","AMT","AMZN","ANET","APA","APD","APH","ASML","ATVI","AVGO","AXP",
   "BA","BAC","BAX","BBY","BDX","BIIB","BK","BKNG","BLK","BMY","BRK.B","BSX","C","CARR","CAT","CB","CCI","CCL","CDNS","CDW","CE","CELH","CHTR","CL","CMCSA","CME","COF","COIN","COP","COST","CRM","CRWD","CSCO","CSX","CTAS","CTSH","CTVA","CVS","CVX",
   "DD","DE","DELL","DHI","DHR","DIS","DKNG","DOW","DPZ","DUK","DVN",
   "EA","EL","EMR","ENPH","ETN","ETSY","EW","EXC",
@@ -165,10 +164,8 @@ const DEFAULT_SYMBOLS: string[] = [
   "SBUX","SCHW","SHOP","SMCI","SNOW","SO","SPG","SPGI","SPY","SQ","T","TECL","TEAM","TEL","TGT","TJX","TMUS","TSLA","TSM","TTD","TXN",
   "UAL","UBER","UNH","UNP","UPS","V","VLO","VRSK","VRTX","VZ",
   "WBA","WBD","WDAY","WELL","WFC","WMT","XLE","XLF","XLK","XOM","ZM",
-  // Add more as you like; /symbols.json will be merged in automatically.
 ];
 
-// Format YYYY-MM-DD exactly as entered (no timezone shifts)
 const fmtDate = (iso: string) => {
   if (!iso) return "";
   const [y, m, d] = iso.split("-").map(Number);
@@ -192,7 +189,7 @@ const fmtSignedMoney2 = (v:number) =>
 type ChartMode = "equity" | "price";
 type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 
-/* ========== Terminal palette for Recharts ========== */
+/* ========== Recharts palette ========== */
 const PALETTE = {
   grid: "var(--grid)",
   axis: "var(--muted)",
@@ -200,9 +197,8 @@ const PALETTE = {
   tooltipBorder: "var(--border)",
   text: "var(--text)",
   priceLine: "var(--cyan)",
-  // Make equity identical to price:
-  equityLine: "var(--cyan)",
-  equityFill: "rgba(0, 184, 212, 0.14)", // fallback alpha; gradient will still use priceLine below
+  equityLine: "var(--cyan)", // same as price
+  equityFill: "rgba(0, 184, 212, 0.14)",
   up: "var(--up)",
   down: "var(--down)",
   threshold: "var(--accent)",
@@ -240,23 +236,25 @@ function SkeletonCard() {
   );
 }
 
-/* ======= Sections + Tabs ======= */
+/* ======= Sections + Tabs (Trades merged into Results) ======= */
 const SECTIONS = [
   { id: "docs", label: "Docs" },
   { id: "peek", label: "Peek" },
   { id: "strategy", label: "Strategy" },
   { id: "results", label: "Results" },
-  { id: "trades", label: "Trades" },
   { id: "drawdown", label: "Drawdown" },
 ] as const;
 
 function useActiveSection() {
   const [active, setActive] = useState<string>("docs");
   const observer = useRef<IntersectionObserver | null>(null);
+
   useEffect(() => {
     const opts = { root: null, rootMargin: "0px 0px -70% 0px", threshold: [0, 0.2, 0.6] };
     const cb: IntersectionObserverCallback = (entries) => {
-      entries.forEach((entry) => entry.isIntersecting && setActive(entry.target.id));
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) setActive(entry.target.id);
+      });
     };
     observer.current = new IntersectionObserver(cb, opts);
     SECTIONS.forEach(({ id }) => {
@@ -265,17 +263,18 @@ function useActiveSection() {
     });
     return () => observer.current?.disconnect();
   }, []);
-  return active;
+  return { active, setActive };
 }
 
-function TabBar({ active }: { active: string }) {
+function TabBar({ active, setActive }: { active: string; setActive: (id: string) => void }) {
   const scrollTo = (id: string) => {
+    setActive(id); // instant highlight on click
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   return (
     <div className="sticky top-0 z-30 bg-[var(--bg)]/85 backdrop-blur border-b border-[var(--border)] shadow-[inset_0_-1px_0_0_var(--border)]">
-      <div className="mx-auto max-w-7xl px-4 py-3 flex flex-wrap gap-2 scrollbar-thin">
+      <div className="mx-auto max-w-7xl px-4 py-3 flex flex-wrap gap-2">
         {SECTIONS.map(({ id, label }) => {
           const isActive = active === id;
           return (
@@ -304,8 +303,6 @@ function useSymbols() {
     [...new Set(DEFAULT_SYMBOLS.concat(PRESETS))].sort()
   );
   useEffect(() => {
-    // If you add /public/symbols.json with ["AAPL","MSFT",...],
-    // this will merge and de-dup with DEFAULT_SYMBOLS.
     fetch(`${import.meta.env.BASE_URL}symbols.json`)
       .then(r => (r.ok ? r.json() : Promise.reject()))
       .then((arr: string[]) => {
@@ -314,7 +311,7 @@ function useSymbols() {
           setSymbols(merged);
         }
       })
-      .catch(() => { /* optional */ });
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return symbols;
@@ -336,7 +333,6 @@ function SymbolIndex({
     return base.filter((s) => s.includes(term));
   }, [q, all]);
 
-  // Group by first letter
   const groups = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const s of filtered) {
@@ -414,13 +410,11 @@ export default function App() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
 
-  // strategy selector + params
   const [strategy, setStrategy] = useState<StrategyKey>("breakout");
   const [fast, setFast] = useState("10");
   const [slow, setSlow] = useState("30");
   const [revDropPct, setRevDropPct] = useState("2.0");
 
-  // ---- NEW: date guards (never allow start > end) ----
   const onStartChange = (v: string) => {
     const newStart = v;
     setStart(newStart);
@@ -432,7 +426,6 @@ export default function App() {
     if (newEnd < start) setStart(newEnd);
   };
 
-  // ---- NEW: reset results when symbol changes ----
   useEffect(() => {
     setPeek(null);
     setResult(null);
@@ -484,7 +477,7 @@ export default function App() {
       }
       const payload: any = {
         symbol, start, end,
-        threshold: thr, hold_days: hd, // compatibility
+        threshold: thr, hold_days: hd,
         strategy,
         params:
           strategy === "breakout"
@@ -540,13 +533,13 @@ export default function App() {
     else { setSortKey(key); setSortDir("asc"); }
   };
 
-  const activeSection = useActiveSection();
+  const { active, setActive } = useActiveSection();
 
   return (
     <div className="theme-terminal">
       <div className="page-root min-h-screen bg-[var(--bg)] text-[var(--text)]">
         <div className="relative overflow-hidden">
-          <div className="relative mx-auto max-w-7xl px-4 pt-10 pb-6">
+          <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
             <div className="flex items-center gap-3">
               <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">
                 $
@@ -556,10 +549,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* Pretty, pill-style nav tabs */}
-        <TabBar active={activeSection} />
+        {/* Bigger, satisfying nav tabs */}
+        <TabBar active={active} setActive={setActive} />
 
-        <div className="mx-auto max-w-7xl px-4 pt-6 pb-10 space-y-8">
+        <div className="mx-auto max-w-6xl px-4 pt-6 pb-10 space-y-8">
           {/* =================== Documentation =================== */}
           <div id="docs" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
@@ -568,8 +561,7 @@ export default function App() {
               <li><strong>Peek:</strong> fetches a quick snapshot with min/median/max closes and a <em>suggested threshold</em>.</li>
               <li><strong>Choose a strategy:</strong> Breakout (threshold + hold days), SMA Crossover (fast/slow), or Mean Reversion (drop% + hold).</li>
               <li><strong>Run Backtest:</strong> equity curve is cash-only and steps on exit days; price chart shows entries/exits.</li>
-              <li><strong>Read the tiles:</strong> values that are generally good appear <span className="text-up font-medium">green</span>; unfavorable values are <span className="text-down font-medium">red</span>.</li>
-              <li><strong>Optimizer Insights:</strong> quick, strategy-aware tweaks and small parameter sweeps to explore next.</li>
+              <li><strong>Read the tiles:</strong> good values appear <span className="text-up font-medium">green</span>; unfavorable values are <span className="text-down font-medium">red</span>.</li>
               <li><strong>Assumptions:</strong> daily closes only; no fees/slippage/leverage; one position at a time.</li>
             </ul>
           </div>
@@ -580,7 +572,7 @@ export default function App() {
             <div className="text-xs text-[var(--muted)] mt-1 mb-3">Type or pick a symbol, choose dates, and click Peek.</div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left: controls and presets (span 2 columns on large screens) */}
+              {/* Controls + presets */}
               <div className="lg:col-span-2">
                 <div className="flex flex-wrap gap-2 mb-3">
                   {PRESETS.map((sym) => (
@@ -661,12 +653,11 @@ export default function App() {
             </div>
           </div>
 
-          {/* Strategy & Parameters (dynamic) */}
+          {/* Strategy & Parameters */}
           <div id="strategy" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy & Parameters</h3>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
-                {/* Strategy */}
                 <label className="text-sm sm:col-span-2">
                   <div className="mb-1 text-[var(--text)]/80">Strategy</div>
                   <select
@@ -680,7 +671,6 @@ export default function App() {
                   </select>
                 </label>
 
-                {/* Breakout params */}
                 {strategy === "breakout" && (
                   <>
                     <label className="text-sm">
@@ -709,7 +699,6 @@ export default function App() {
                   </>
                 )}
 
-                {/* SMA Cross params */}
                 {strategy === "sma_cross" && (
                   <>
                     <label className="text-sm">
@@ -723,7 +712,6 @@ export default function App() {
                   </>
                 )}
 
-                {/* Mean Reversion params */}
                 {strategy === "mean_rev" && (
                   <>
                     <label className="text-sm">
@@ -744,41 +732,38 @@ export default function App() {
                 </div>
               </div>
 
-              {/* How this works (expanded, strategy-aware) */}
+              {/* Strategy explanations */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] leading-6">
                 <div className="font-semibold text-[var(--text)] mb-1">How this works</div>
                 {strategy === "breakout" && (
                   <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
                     <li><strong>Intent:</strong> catch momentum when price <em>closes above</em> a user-set <strong>Threshold</strong>.</li>
-                    <li><strong>Entry:</strong> first daily close &gt;= Threshold opens a single long position next bar (close→close model).</li>
-                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong> bars; P&L realized only on exits.</li>
-                    <li><strong>Tip:</strong> start near Peek’s <em>Suggested Threshold</em> (75th percentile close), then sweep ±2–5%.</li>
-                    <li><strong>Notes:</strong> one position at a time; no slippage/fees; daily data only.</li>
+                    <li><strong>Entry:</strong> first daily close ≥ Threshold opens a single long position next bar.</li>
+                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong> bars; P&L realized on exits.</li>
+                    <li><strong>Tip:</strong> start near Peek’s <em>Suggested Threshold</em>, then sweep ±2–5%.</li>
                   </ul>
                 )}
                 {strategy === "sma_cross" && (
                   <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
                     <li><strong>Intent:</strong> ride trends when short-term average outruns long-term average.</li>
-                    <li><strong>Entry:</strong> go long when <strong>Fast SMA</strong> crosses above <strong>Slow SMA</strong> (golden cross).</li>
-                    <li><strong>Exit:</strong> on reverse cross (death cross). Backend may support fixed-horizon exit variants.</li>
-                    <li><strong>Tip:</strong> try (5/20), (10/30), (20/50). Requiring price &gt; Slow SMA can reduce chop.</li>
-                    <li><strong>Notes:</strong> one position max; daily closes; no fees/slippage in metrics shown.</li>
+                    <li><strong>Entry:</strong> long when <strong>Fast SMA</strong> crosses above <strong>Slow SMA</strong>.</li>
+                    <li><strong>Exit:</strong> on reverse cross (or fixed horizon variant if supported).</li>
+                    <li><strong>Tip:</strong> try (5/20), (10/30), (20/50); requiring price &gt; Slow SMA can reduce chop.</li>
                   </ul>
                 )}
                 {strategy === "mean_rev" && (
                   <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
                     <li><strong>Intent:</strong> buy dips expecting a short-term snap-back.</li>
-                    <li><strong>Entry:</strong> long when price drops at least <strong>Drop %</strong> from the prior close (or recent ref), next bar open/close modeled as daily.</li>
-                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong>; optional threshold/MA target exits can be added later.</li>
-                    <li><strong>Tip:</strong> sweep Drop % in 1–4% and Hold Days in 2–4 for balanced exposure.</li>
-                    <li><strong>Notes:</strong> single position; no fees/slippage; daily data.</li>
+                    <li><strong>Entry:</strong> long when price drops at least <strong>Drop %</strong> from the prior close.</li>
+                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong>.</li>
+                    <li><strong>Tip:</strong> sweep Drop % in 1–4 and Hold Days in 2–4.</li>
                   </ul>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Backtest Results */}
+          {/* Backtest Results (includes Trades + Optimizer) */}
           {result && (
             <>
               <div id="results" className="grid lg:grid-cols-3 gap-8 items-stretch">
@@ -827,7 +812,6 @@ export default function App() {
                       {mode === "equity" ? (
                         <AreaChart data={result?.equity_curve ?? []} margin={{ left: 68, right: 16, top: 10, bottom: 38 }}>
                           <defs>
-                            {/* Gradient uses the same stroke color as price */}
                             <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor={PALETTE.priceLine} stopOpacity={0.28} />
                               <stop offset="95%" stopColor={PALETTE.priceLine} stopOpacity={0.04} />
@@ -849,7 +833,6 @@ export default function App() {
                             }}
                             formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
                           />
-                          {/* stroke identical to price */}
                           <Area type="monotone" dataKey="equity" stroke={PALETTE.priceLine} fill="url(#eqFill)" strokeWidth={2} />
                         </AreaChart>
                       ) : (
@@ -859,7 +842,7 @@ export default function App() {
                             <Label value="Date" position="bottom" offset={24} fill={PALETTE.axis} />
                           </XAxis>
                           <YAxis stroke={PALETTE.axis} tickFormatter={fmtMoney} tickMargin={10}>
-                            <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-34} dy={18} fill={PALETTE.axis} />
+                            <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-28} dy={10} fill={PALETTE.axis} />
                           </YAxis>
                           <Tooltip
                             contentStyle={{
@@ -902,8 +885,8 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Trades + Optimizer */}
-                <div id="trades" className="flex flex-col h-full">
+                {/* Trades + Optimizer (NO id; stays under Results) */}
+                <div className="flex flex-col h-full">
                   <div className="card p-6 mb-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">
@@ -984,14 +967,11 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Optimizer Insights */}
-                  {result && (
-                    <OptimizerPanel
-                      strategy={strategy}
-                      result={result}
-                      trades={(tradesWithBars as any) as (Trade & { daysBars?: number })[]}
-                    />
-                  )}
+                  <OptimizerPanel
+                    strategy={strategy}
+                    result={result}
+                    trades={(tradesWithBars as any) as (Trade & { daysBars?: number })[]}
+                  />
                 </div>
               </div>
 
@@ -1038,7 +1018,7 @@ function Th({ children, onClick }: { children: any; onClick?: () => void }) {
   return <th className="cursor-pointer text-[var(--text)]/90" onClick={onClick}>{children}</th>;
 }
 
-/* ========== Optimizer Panel (vertical tiles + real suggestions) ========== */
+/* ========== Optimizer Panel ========== */
 function OptimizerPanel({
   strategy,
   result,
@@ -1073,18 +1053,18 @@ function OptimizerPanel({
   const hdCfg = Number(result.params.hold_days || 0);
 
   if (trades.length < 5) sugg.push("Few trades — widen date range or loosen entry to collect more samples.");
-  if (expectancy <= 0 && trades.length >= 5) sugg.push("Negative expectancy — nudge entries tighter or exits sooner to cut losers faster.");
+  if (expectancy <= 0 && trades.length >= 5) sugg.push("Negative expectancy — nudge entries tighter or exits sooner.");
   if (profitFactor < 1 && trades.length >= 5) sugg.push("Profit factor < 1 — improve R/R by tightening entries or shortening holds.");
-  if (mdd > 0.20) sugg.push("Max drawdown > 20% — add a simple trend filter (e.g., 50D MA) or a stop.");
-  if (Math.abs(ann) < 0.02 && trades.length >= 10) sugg.push("Low annualized return — sweep nearby parameters (small grid).");
-  if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) sugg.push("Average bars exceed configured hold — verify alignment or use fixed-bars exit.");
+  if (mdd > 0.20) sugg.push("Max drawdown > 20% — add a trend filter (e.g., 50D MA) or a stop.");
+  if (Math.abs(ann) < 0.02 && trades.length >= 10) sugg.push("Low annualized return — sweep nearby parameters.");
+  if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) sugg.push("Average bars exceed configured hold — verify alignment.");
 
   if (strategy === "breakout") {
     sugg.unshift("Breakout: try threshold ±2–5% around suggested and hold 2–5 days.");
   } else if (strategy === "sma_cross") {
-    sugg.unshift("SMA Cross: test fast/slow pairs like 5/20, 10/30, 20/50; require price above slow to reduce chop.");
+    sugg.unshift("SMA Cross: test 5/20, 10/30, 20/50; require price above slow to reduce chop.");
   } else if (strategy === "mean_rev") {
-    sugg.unshift("Mean Reversion: sweep drop% from 1–4% and short holds (2–4 days); consider exit on snap-back to MA.");
+    sugg.unshift("Mean Reversion: sweep drop% 1–4 and short holds (2–4 days).");
   }
   if (sugg.length < 2) sugg.push("Run a quick parameter sweep near current settings.");
 
