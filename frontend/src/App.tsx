@@ -2,10 +2,9 @@
 import axios from "axios";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  LineChart, Line, ReferenceLine, ReferenceDot, Label
+  LineChart, Line, ReferenceLine, ReferenceDot, Label, Brush
 } from "recharts";
 import DrawdownChart from "./components/DrawdownChart";
-// ❌ Removed: import { exportTradesCSV } from "./utils/csv";
 import "./index.css";
 
 /* ========== API + Normalizers ========== */
@@ -142,6 +141,8 @@ type BacktestResponse = {
   trades: Trade[]; equity_curve: { date: string; equity: number }[]; price_series?: { date: string; close: number }[]; note?: string;
 };
 
+type StrategyKey = "breakout" | "sma_cross" | "mean_rev";
+
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
 
 // Format YYYY-MM-DD exactly as entered (no timezone shifts)
@@ -177,11 +178,43 @@ const PALETTE = {
   text: "var(--text)",
   priceLine: "var(--cyan)",
   equityLine: "var(--accent)",
-  equityFill: "rgba(255,176,0,0.12)", // accent w/ alpha
+  equityFill: "rgba(255,176,0,0.12)",
   up: "var(--up)",
   down: "var(--down)",
   threshold: "var(--accent)",
 };
+
+/* ======= Small UI helpers: Spinner, Error, Skeleton ======= */
+function Spinner({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className="animate-spin inline-block align-[-2px]">
+      <circle cx="12" cy="12" r="10" stroke="var(--border)" strokeWidth="4" fill="none" />
+      <path d="M22 12a10 10 0 0 0-10-10" stroke="var(--accent)" strokeWidth="4" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ErrorBanner({ msg, onClose }: { msg: string; onClose?: () => void }) {
+  return (
+    <div className="rounded-lg border border-[var(--down)]/50 bg-[var(--down)]/10 text-down px-3 py-2 flex items-start justify-between">
+      <div className="text-sm">{msg}</div>
+      {onClose && (
+        <button onClick={onClose} className="ml-3 text-xs underline decoration-[var(--down)]/60 hover:opacity-80">
+          dismiss
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SkeletonCard() {
+  return (
+    <div className="p-6 rounded-xl border border-[var(--border)] bg-[var(--panel)]">
+      <div className="h-5 w-40 bg-[var(--border)]/60 rounded mb-4" />
+      <div className="h-[260px] w-full bg-[var(--border)]/40 rounded" />
+    </div>
+  );
+}
 
 /* ========== Main App ========== */
 export default function App() {
@@ -205,6 +238,12 @@ export default function App() {
   const [sortKey, setSortKey] = useState<SortKey>("entry_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
+
+  // NEW: strategy selector + contextual params
+  const [strategy, setStrategy] = useState<StrategyKey>("breakout");
+  const [fast, setFast] = useState("10");
+  const [slow, setSlow] = useState("30");
+  const [revDropPct, setRevDropPct] = useState("2.0");
 
   useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
 
@@ -245,9 +284,25 @@ export default function App() {
     try {
       const thr = parseThreshold();
       const hd = parseHoldDays();
-      if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
-      if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
-      const res = await api.post<BacktestResponse>("/backtest", { symbol, start, end, threshold: thr, hold_days: hd });
+      if (strategy === "breakout") {
+        if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
+        if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
+      }
+      const payload: any = {
+        symbol, start, end,
+        // legacy fields so your existing backend continues to work
+        threshold: thr, hold_days: hd,
+        // new strategy API (safe to ignore server-side if unsupported)
+        strategy,
+        params:
+          strategy === "breakout"
+            ? { threshold: thr, hold_days: hd }
+            : strategy === "sma_cross"
+            ? { fast: Number(fast), slow: Number(slow) }
+            : { drop_pct: Number(revDropPct), hold_days: hd },
+      };
+
+      const res = await api.post<BacktestResponse>("/backtest", payload);
       setResult(res.data);
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? e.message);
@@ -294,23 +349,21 @@ export default function App() {
     else { setSortKey(key); setSortDir("asc"); }
   };
 
-return (
-  <div className="theme-terminal">
-    <div className="page-root min-h-screen bg-[var(--bg)] text-[var(--text)]">
-      <div className="relative overflow-hidden">
-        <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
-          <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">
-              $
+  return (
+    <div className="theme-terminal">
+      <div className="page-root min-h-screen bg-[var(--bg)] text-[var(--text)]">
+        <div className="relative overflow-hidden">
+          <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
+            <div className="flex items-center gap-3">
+              <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">
+                $
+              </div>
+              <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
             </div>
-            <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
           </div>
         </div>
-      </div>
 
-      <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
-        {/* === your existing sections start here (Documentation, Peek, etc.) === */}
-
+        <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
           {/* =================== Documentation =================== */}
           <div className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
@@ -404,10 +457,11 @@ return (
 
             <div className="flex flex-wrap gap-3 mt-4 items-center">
               <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
-                {peekBusy ? "Peeking…" : "Peek"}
+                {peekBusy ? (<><Spinner /><span className="ml-2">Peeking…</span></>) : "Peek"}
               </button>
-              {error && <span className="text-down">Error: {error}</span>}
             </div>
+            {error && <div className="mt-3"><ErrorBanner msg={error} onClose={()=>setError(null)} /></div>}
+            {peekBusy && !peek && <div className="mt-4"><SkeletonCard /></div>}
           </div>
 
           {/* Peek snapshot */}
@@ -418,7 +472,6 @@ return (
                   <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">
                     {peek.symbol} Market Snapshot
                   </h3>
-                  {/* EXACT user-selected dates; show backend span only if different */}
                   <div className="text-sm text-[var(--muted)]">
                     {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
                     {(peek.start && peek.end) && (peek.start !== start || peek.end !== end) && (
@@ -440,47 +493,110 @@ return (
             </div>
           )}
 
-          {/* Strategy Parameters */}
+          {/* Strategy & Parameters (dynamic) */}
           <div className="card p-6 sm:p-7">
-            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy Parameters</h3>
+            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy & Parameters</h3>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
-                <label className="text-sm">
-                  <div className="mb-1 text-[var(--text)]/80">Threshold</div>
-                  <input
-                    className={"input " + (thrInvalid ? "ring-2 ring-[var(--down)]" : "")}
-                    inputMode="decimal"
-                    step="any"
-                    value={threshold}
-                    onChange={(e) => setThreshold(e.target.value)}
-                    placeholder="e.g. 185.75"
-                  />
+                {/* Strategy */}
+                <label className="text-sm sm:col-span-2">
+                  <div className="mb-1 text-[var(--text)]/80">Strategy</div>
+                  <select
+                    className="input"
+                    value={strategy}
+                    onChange={(e) => setStrategy(e.target.value as StrategyKey)}
+                  >
+                    <option value="breakout">Breakout (threshold)</option>
+                    <option value="sma_cross">SMA Crossover</option>
+                    <option value="mean_rev">Mean Reversion</option>
+                  </select>
                 </label>
-                <label className="text-sm">
-                  <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
-                  <input
-                    className={"input " + (hdInvalid ? "ring-2 ring-[var(--down)]" : "")}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    min={1}
-                    value={holdDays}
-                    onChange={(e) => setHoldDays(e.target.value)}
-                    placeholder=">= 1"
-                  />
-                </label>
+
+                {/* Breakout params */}
+                {strategy === "breakout" && (
+                  <>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Threshold</div>
+                      <input
+                        className={"input " + (thrInvalid ? "ring-2 ring-[var(--down)]" : "")}
+                        inputMode="decimal"
+                        step="any"
+                        value={threshold}
+                        onChange={(e) => setThreshold(e.target.value)}
+                        placeholder="e.g. 185.75"
+                      />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
+                      <input
+                        className={"input " + (hdInvalid ? "ring-2 ring-[var(--down)]" : "")}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        min={1}
+                        value={holdDays}
+                        onChange={(e) => setHoldDays(e.target.value)}
+                        placeholder=">= 1"
+                      />
+                    </label>
+                  </>
+                )}
+
+                {/* SMA Cross params */}
+                {strategy === "sma_cross" && (
+                  <>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Fast SMA</div>
+                      <input className="input" inputMode="numeric" value={fast} onChange={(e)=>setFast(e.target.value)} placeholder="e.g. 10" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Slow SMA</div>
+                      <input className="input" inputMode="numeric" value={slow} onChange={(e)=>setSlow(e.target.value)} placeholder="e.g. 30" />
+                    </label>
+                  </>
+                )}
+
+                {/* Mean Reversion params */}
+                {strategy === "mean_rev" && (
+                  <>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Drop % (from recent close)</div>
+                      <input className="input" inputMode="decimal" step="any" value={revDropPct} onChange={(e)=>setRevDropPct(e.target.value)} placeholder="e.g. 2.0" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
+                      <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={(e)=>setHoldDays(e.target.value)} placeholder=">= 1" />
+                    </label>
+                  </>
+                )}
+
                 <div className="sm:col-span-2 flex items-center gap-3">
                   <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doBacktest} disabled={loading || !canPeek}>
-                    Run Backtest
+                    {loading ? (<><Spinner /><span className="ml-2">Running…</span></>) : "Run Backtest"}
                   </button>
-                  {/* ❌ Removed Export CSV button and handler */}
                 </div>
               </div>
+
               <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] leading-6">
-                <div className="font-semibold text-[var(--text)] mb-1">How this strategy works</div>
+                <div className="font-semibold text-[var(--text)] mb-1">How this works</div>
                 <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
-                  <li><span className="font-medium">Threshold</span>: go long when the close crosses <strong>above</strong> this price.</li>
-                  <li><span className="font-medium">Hold Days</span>: hold for N trading days; exit at that day’s close.</li>
-                  <li>One position at a time; P&amp;L realized on exits and added to cash-only equity.</li>
+                  {strategy === "breakout" && (
+                    <>
+                      <li>Enter long on first close above <strong>Threshold</strong>; exit after N days.</li>
+                      <li>One position at a time; P&amp;L realized on exits.</li>
+                    </>
+                  )}
+                  {strategy === "sma_cross" && (
+                    <>
+                      <li>Enter long when <strong>Fast SMA</strong> crosses above <strong>Slow SMA</strong>.</li>
+                      <li>Exit on reverse cross (or fixed horizon if modeled by backend).</li>
+                    </>
+                  )}
+                  {strategy === "mean_rev" && (
+                    <>
+                      <li>Enter long after a drop of at least <strong>Drop %</strong> from recent close.</li>
+                      <li>Exit after N days.</li>
+                    </>
+                  )}
                 </ul>
               </div>
             </div>
@@ -490,7 +606,15 @@ return (
           {result && (
             <>
               <div className="grid lg:grid-cols-3 gap-8 items-stretch">
-                <div className="card p-6 lg:col-span-2 flex flex-col">
+                <div className="card p-6 lg:col-span-2 flex flex-col relative">
+                  {loading && (
+                    <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center rounded-xl z-10">
+                      <div className="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--panel)] text-sm">
+                        <Spinner /> <span className="ml-2">Crunching numbers…</span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between mb-1">
                     <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Backtest Results</h3>
                     <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
@@ -542,13 +666,14 @@ return (
                           <Tooltip
                             contentStyle={{
                               background: "var(--panel)",
-                              border: "1px solid var(--border)",    // ⬅️ simpler + reliable
+                              border: "1px solid var(--border)",
                               borderRadius: 12,
                               color: "var(--text)",
                             }}
                             formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
                           />
                           <Area type="monotone" dataKey="equity" stroke={PALETTE.equityLine} fill="url(#eqFill)" strokeWidth={2} />
+                          <Brush dataKey="date" height={24} stroke="var(--accent)" travellerWidth={10} />
                         </AreaChart>
                       ) : (
                         <LineChart data={result?.price_series ?? []} margin={{ left: 72, right: 16, top: 10, bottom: 38 }}>
@@ -562,7 +687,7 @@ return (
                           <Tooltip
                             contentStyle={{
                               background: "var(--panel)",
-                              border: "1px solid var(--border)",    // ⬅️ use the var directly
+                              border: "1px solid var(--border)",
                               borderRadius: 12,
                               color: "var(--text)",
                             }}
@@ -576,6 +701,7 @@ return (
                               <ReferenceDot x={t.exit_date} y={t.exit_price} r={4} fill={PALETTE.down} stroke="rgba(0,0,0,0.5)" />
                             </g>
                           ))}
+                          <Brush dataKey="date" height={24} stroke="var(--accent)" travellerWidth={10} />
                         </LineChart>
                       )}
                     </ResponsiveContainer>
@@ -749,7 +875,7 @@ function OptimizerPanel({
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
   const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
-  // ---- REAL suggestions (no generic filler) ----
+  // ---- REAL suggestions ----
   const sugg: string[] = [];
   const mdd = result.metrics.max_drawdown;
   const ann = result.metrics.annualized_return;
@@ -775,8 +901,6 @@ function OptimizerPanel({
   if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) {
     sugg.push("Average bars exceed configured hold — verify date alignment or use a fixed-bars exit.");
   }
-
-  // Ensure at least two concrete actions
   if (sugg.length < 2) {
     sugg.push("Run a quick parameter sweep: test thresholds near the suggested level and hold days 2–5.");
   }
@@ -787,7 +911,6 @@ function OptimizerPanel({
         Optimizer Insights
       </h3>
 
-      {/* Vertical stack of short, wide tiles */}
       <div className="flex flex-col gap-2 mb-4">
         <MetricRow
           label="Profit Factor"
@@ -798,7 +921,6 @@ function OptimizerPanel({
         <MetricRow label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
-      {/* Compact suggestions box */}
       <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
         <div className="text-[12px] font-semibold text-[var(--text)]/80 mb-1.5">Suggestions</div>
         <ul className="list-disc ml-5 text-[12px] leading-5 text-[var(--text)]/80 space-y-1">
@@ -815,7 +937,6 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   const s = String(value);
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
 
-  // Keep rows short; value font adapts to length and screen size
   const valueSize =
     significantLen > 12
       ? "text-base sm:text-lg"
