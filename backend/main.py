@@ -7,10 +7,10 @@ from backtest import (
     run_backtest,
     run_backtest_stacking,
     breakout_entries,              # cross-only
-    breakout_entries_everybar,     # <<< every bar >= threshold
+    breakout_entries_everybar,     # every bar >= threshold
     sma_entries,                   # cross-only
-    sma_entries_everybar,          # <<< every bar fast >= slow
-    meanrev_entries,               # z-score variant (optional)
+    sma_entries_everybar,          # every bar fast >= slow
+    meanrev_entries,               # (optional) z-score variant
     meanrev_drop_entries,          # drop-% variant (UI-friendly)
 )
 
@@ -32,13 +32,13 @@ async def backtest_post(req: Request):
     else:
         strategy = "breakout"
 
-    # Entry mode: "every_bar" (default) or "cross"
+    # NEW: default to "every_bar" to create many trades; pass "cross" to get sparse signals
     entry_mode = (data.get("entry_mode") or data.get("mode") or "every_bar").lower().strip()
 
-    # Core params (allow both top-level and params)
+    # Core params (accept both top-level and params{})
     hold_days = data.get("hold_days", params.get("hold_days"))
     threshold = data.get("threshold", params.get("threshold"))
-    stacking  = bool(data.get("stacking", True))        # keep stacking ON
+    stacking  = bool(data.get("stacking", True))
     position_size = float(data.get("position_size", 1.0))
 
     if not (symbol and start and end):
@@ -50,7 +50,7 @@ async def backtest_post(req: Request):
     if hold_days < 1:
         raise HTTPException(status_code=400, detail="hold_days must be an integer >= 1")
 
-    # Load data
+    # Load range
     df, _src = _get_prices_cached(symbol, start, end)
     if "close" not in df.columns or df["close"].empty:
         raise HTTPException(status_code=404, detail="No closes in range.")
@@ -64,18 +64,18 @@ async def backtest_post(req: Request):
     params_payload: Dict[str, Any] = {"hold_days": int(hold_days), "entry_mode": entry_mode}
 
     if strategy == "breakout":
-        # If missing, choose lively threshold (~75th pct of closes)
+        # If missing, choose lively threshold (~75th pct)
         if threshold is None or not isinstance(threshold, (int, float)):
             closes = pd.to_numeric(df["close"], errors="coerce").astype(float).to_numpy()
             threshold = float(np.nanpercentile(closes, 75))
         params_payload["threshold"] = float(threshold)
 
-        # entries: every-bar by default
-        if entry_mode == "cross":
-            entries = breakout_entries(df, float(threshold))
-        else:
-            entries = breakout_entries_everybar(df, float(threshold))
-
+        # EVERY BAR by default
+        entries = (
+            breakout_entries(df, float(threshold))
+            if entry_mode == "cross"
+            else breakout_entries_everybar(df, float(threshold))
+        )
         result = run_backtest_stacking(df, entries, hold_days, initial_equity, position_size)
 
     elif strategy == "sma":
@@ -90,24 +90,22 @@ async def backtest_post(req: Request):
             fast, slow = max(5, min(fast, slow) - 5), max(fast, slow)
         params_payload.update({"fast": fast, "slow": slow})
 
-        # entries: every-bar by default
-        if entry_mode == "cross":
-            entries = sma_entries(df, fast, slow)
-        else:
-            entries = sma_entries_everybar(df, fast, slow)
-
+        # EVERY BAR by default
+        entries = (
+            sma_entries(df, fast, slow)
+            if entry_mode == "cross"
+            else sma_entries_everybar(df, fast, slow)
+        )
         result = run_backtest_stacking(df, entries, hold_days, initial_equity, position_size)
 
     elif strategy == "mean_reversion":
-        # Support drop-% (preferred by your UI) and z-score fallback
+        # Prefer your UI's drop-%; fallback to z-score if provided
         drop_pct = data.get("drop_pct", params.get("drop_pct"))
         lookback = data.get("lookback", params.get("lookback"))
         k_sigma  = data.get("k_sigma", params.get("k_sigma"))
 
         if isinstance(drop_pct, (int, float)):
-            drop_pct = float(drop_pct)
-            if drop_pct <= 0:
-                drop_pct = 1.0
+            drop_pct = float(drop_pct) if float(drop_pct) > 0 else 1.0
             params_payload.update({"drop_pct": drop_pct})
             entries = meanrev_drop_entries(df, drop_pct)  # every oversold bar
         else:
@@ -117,7 +115,7 @@ async def backtest_post(req: Request):
                 lookback = 20
             k_sigma = float(k_sigma) if isinstance(k_sigma, (int, float)) else 1.0
             params_payload.update({"lookback": lookback, "k_sigma": k_sigma})
-            entries = meanrev_entries(df, lookback, k_sigma)  # you can also make a z-score_everybar if desired
+            entries = meanrev_entries(df, lookback, k_sigma)
 
         result = run_backtest_stacking(df, entries, hold_days, initial_equity, position_size)
 
