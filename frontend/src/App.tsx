@@ -622,6 +622,7 @@ function Th({ children, onClick }: { children: any; onClick?: () => void }) {
 }
 
 /* ========== Optimizer Panel (vertical wide/short tiles) ========== */
+/* ========== Optimizer Panel (vertical tiles + real suggestions) ========== */
 function OptimizerPanel({
   result,
   trades,
@@ -644,18 +645,41 @@ function OptimizerPanel({
   const hitRate = trades.length ? wins.length / trades.length : 0;
   const expectancy = avgWin * hitRate - avgLossAbs * (1 - hitRate);
 
-  const bars = trades
-    .map((t) => t.daysBars)
-    .filter((b) => Number.isFinite(b)) as number[];
+  const bars = trades.map((t) => t.daysBars).filter((b) => Number.isFinite(b)) as number[];
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
-  const medBars = bars.length
-    ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)]
-    : 0;
+  const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
-  const suggestions: string[] = [];
-  if (trades.length < 5)
-    suggestions.push("Few trades — widen date range or lower the threshold.");
-  suggestions.push("Include fees & slippage in backtests.");
+  // ---- REAL suggestions (no generic filler) ----
+  const sugg: string[] = [];
+  const mdd = result.metrics.max_drawdown;
+  const ann = result.metrics.annualized_return;
+  const hdCfg = Number(result.params.hold_days || 0);
+
+  if (trades.length < 5) {
+    sugg.push("Few trades — widen date range or lower the threshold to collect more samples.");
+  }
+  if (expectancy <= 0 && trades.length >= 5) {
+    sugg.push("Negative expectancy — lower the threshold slightly or reduce hold days by 1–2 to cut losers faster.");
+  } else if (profitFactor < 1 && trades.length >= 5) {
+    sugg.push("Profit factor < 1 — raise the threshold or shorten hold days to improve reward/risk.");
+  }
+  if (hitRate < 0.45 && profitFactor >= 1.1) {
+    sugg.push("Low hit rate with acceptable PF — keep R/R high; consider a slightly higher threshold to skip marginal entries.");
+  }
+  if (mdd > 0.20) {
+    sugg.push("Max drawdown > 20% — add a simple trend filter (e.g., 50D MA) or a stop-loss to cap downside.");
+  }
+  if (Math.abs(ann) < 0.02 && trades.length >= 10) {
+    sugg.push("Low annualized return — sweep hold days 2–5 and thresholds around the suggested value (±2–5%).");
+  }
+  if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) {
+    sugg.push("Average bars exceed configured hold — verify date alignment or use a fixed-bars exit.");
+  }
+
+  // Ensure at least two concrete actions
+  if (sugg.length < 2) {
+    sugg.push("Run a quick parameter sweep: test thresholds near the suggested level and hold days 2–5.");
+  }
 
   return (
     <div className="card p-6 flex-1 flex flex-col">
@@ -678,7 +702,7 @@ function OptimizerPanel({
       <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
         <div className="text-[12px] font-semibold text-slate-300 mb-1.5">Suggestions</div>
         <ul className="list-disc ml-5 text-[12px] leading-5 text-slate-300 space-y-1">
-          {suggestions.map((s, i) => (
+          {sugg.slice(0, 4).map((s, i) => (
             <li key={i}>{s}</li>
           ))}
         </ul>
@@ -686,7 +710,6 @@ function OptimizerPanel({
     </div>
   );
 }
-
 /* Short, wide metric row with adaptive value sizing */
 function MetricRow({ label, value }: { label: string; value: string }) {
   const s = String(value);
@@ -709,3 +732,4 @@ function MetricRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
