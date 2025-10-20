@@ -17,6 +17,8 @@
   --magenta: #ff4dff;     /* optional highlight */
 }
 
+
+
 /* General page base when terminal theme is active */
 .theme-terminal body, .theme-terminal .page-root {
   background-color: var(--bg);
@@ -91,3 +93,29 @@ body { font-size: 17px; }
 
 /* Prevent KPI/trade value wrapping */
 .kpi .value { white-space: nowrap; }
+
+/* Symbol chips */
+.chip {
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.chip:hover { border-color: var(--accent); }
+.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b0c10; /* terminal bg for contrast */
+}
+
+/* Optional: inputs to feel terminal-y */
+.input {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.input::placeholder { color: var(--muted); }
+.input:focus { outline: none; border-color: var(--accent); }
