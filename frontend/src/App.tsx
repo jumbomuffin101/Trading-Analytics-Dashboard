@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect } from "react";
+﻿import { useMemo, useState, useEffect, useRef } from "react";
 import axios from "axios";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -177,8 +177,7 @@ const PALETTE = {
   tooltipBorder: "var(--border)",
   text: "var(--text)",
   priceLine: "var(--cyan)",
-  // Bloomberg-like line color (yellow)
-  equityLine: "#F5C400",
+  equityLine: "#F5C400", // Bloomberg-ish yellow
   equityFill: "rgba(245,196,0,0.14)",
   up: "var(--up)",
   down: "var(--down)",
@@ -217,7 +216,7 @@ function SkeletonCard() {
   );
 }
 
-/* ======= Top Tabs ======= */
+/* ======= Sections + Tabs ======= */
 const SECTIONS = [
   { id: "docs", label: "Docs" },
   { id: "peek", label: "Peek" },
@@ -227,7 +226,28 @@ const SECTIONS = [
   { id: "drawdown", label: "Drawdown" },
 ] as const;
 
-function TabBar() {
+function useActiveSection() {
+  const [active, setActive] = useState<string>("docs");
+  const observer = useRef<IntersectionObserver | null>(null);
+
+  useEffect(() => {
+    const opts = { root: null, rootMargin: "0px 0px -70% 0px", threshold: [0, 0.2, 0.6] };
+    const cb: IntersectionObserverCallback = (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) setActive(entry.target.id);
+      });
+    };
+    observer.current = new IntersectionObserver(cb, opts);
+    SECTIONS.forEach(({ id }) => {
+      const el = document.getElementById(id);
+      if (el) observer.current?.observe(el);
+    });
+    return () => observer.current?.disconnect();
+  }, []);
+  return active;
+}
+
+function TabBar({ active }: { active: string }) {
   const scrollTo = (id: string) => {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -235,15 +255,23 @@ function TabBar() {
   return (
     <div className="sticky top-0 z-20 bg-[var(--bg)]/80 backdrop-blur border-b border-[var(--border)]">
       <div className="mx-auto max-w-6xl px-4 py-2 flex flex-wrap gap-2">
-        {SECTIONS.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => scrollTo(id)}
-            className="px-3 py-1.5 rounded-lg text-sm border border-[var(--border)] bg-[var(--panel)] hover:border-[var(--accent)] transition"
-          >
-            {label}
-          </button>
-        ))}
+        {SECTIONS.map(({ id, label }) => {
+          const isActive = active === id;
+          return (
+            <button
+              key={id}
+              onClick={() => scrollTo(id)}
+              className={
+                "px-3 py-1.5 rounded-full text-sm transition border " +
+                (isActive
+                  ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_0_0_2px_rgba(245,196,0,0.2)]"
+                  : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)]")
+              }
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -277,6 +305,25 @@ export default function App() {
   const [fast, setFast] = useState("10");
   const [slow, setSlow] = useState("30");
   const [revDropPct, setRevDropPct] = useState("2.0");
+
+  // ---- NEW: date guards (never allow start > end) ----
+  const onStartChange = (v: string) => {
+    const newStart = v;
+    setStart(newStart);
+    if (newStart > end) setEnd(newStart);
+  };
+  const onEndChange = (v: string) => {
+    const newEnd = v;
+    setEnd(newEnd);
+    if (newEnd < start) setStart(newEnd);
+  };
+
+  // ---- NEW: reset results when symbol changes ----
+  useEffect(() => {
+    setPeek(null);
+    setResult(null);
+    setError(null);
+  }, [symbol]);
 
   useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
 
@@ -323,9 +370,7 @@ export default function App() {
       }
       const payload: any = {
         symbol, start, end,
-        // legacy fields for compatibility
-        threshold: thr, hold_days: hd,
-        // optional strategy API
+        threshold: thr, hold_days: hd, // compatibility
         strategy,
         params:
           strategy === "breakout"
@@ -334,7 +379,6 @@ export default function App() {
             ? { fast: Number(fast), slow: Number(slow) }
             : { drop_pct: Number(revDropPct), hold_days: hd },
       };
-
       const res = await api.post<BacktestResponse>("/backtest", payload);
       setResult(res.data);
     } catch (e: any) {
@@ -382,6 +426,8 @@ export default function App() {
     else { setSortKey(key); setSortDir("asc"); }
   };
 
+  const activeSection = useActiveSection();
+
   return (
     <div className="theme-terminal">
       <div className="page-root min-h-screen bg-[var(--bg)] text-[var(--text)]">
@@ -396,29 +442,22 @@ export default function App() {
           </div>
         </div>
 
-        {/* Sticky top navigation tabs */}
-        <TabBar />
+        {/* Pretty, pill-style nav tabs */}
+        <TabBar active={activeSection} />
 
         <div className="mx-auto max-w-6xl px-4 pt-6 pb-10 space-y-8">
           {/* =================== Documentation =================== */}
           <div id="docs" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
-            <p className="text-sm text-[var(--text)]/80 mt-2 leading-6">
-              This tool lets you explore simple daily-close strategies on any symbol with a clean,
-              reproducible workflow. Start by selecting a ticker and date range, then click <strong>Peek</strong> to
-              fetch a lightweight snapshot of prices and distribution stats, including a <em>suggested threshold</em> for
-              breakout tests. Next, pick a <strong>Strategy</strong>—a threshold <em>Breakout</em>, a <em>Simple Moving
-              Average Crossover</em>, or a short-horizon <em>Mean Reversion</em>—and enter its parameters. Hit
-              <strong> Run Backtest</strong> to build an equity curve (cash-only, one position at a time), inspect trade cards or
-              a sortable table, and review key metrics such as P&amp;L, annualized return, win rate, drawdown, and
-              expectancy. The equity chart steps only on exit days (realized P&amp;L); the price chart overlays entries and
-              exits plus any relevant reference level (e.g., your threshold). Values that are generally favorable are shown
-              in <span className="text-up font-semibold">green</span> (e.g., positive P&amp;L, higher hit rate), while unfavorable readings appear in
-              <span className="text-down font-semibold"> red</span> (e.g., negative expectancy, larger drawdowns). Use <strong>Optimizer Insights</strong> to get quick,
-              strategy-aware suggestions and parameter sweeps (e.g., threshold ±2–5%, SMA pairs like 5/20/50, or 1–4% drop
-              for mean reversion). Nothing is assumed about fees, slippage, or leverage; fills are on daily closes, and
-              intraday behavior is not modeled. Keep tests simple, compare across symbols or periods, and iterate.
-            </p>
+            <ul className="mt-3 text-sm text-[var(--text)]/80 leading-6 list-disc pl-5 space-y-1">
+              <li><strong>Pick a symbol & dates:</strong> use presets or type your own; dates are auto-corrected so Start ≤ End.</li>
+              <li><strong>Peek:</strong> fetches a quick snapshot with min/median/max closes and a <em>suggested threshold</em>.</li>
+              <li><strong>Choose a strategy:</strong> Breakout (threshold + hold days), SMA Crossover (fast/slow), or Mean Reversion (drop% + hold).</li>
+              <li><strong>Run Backtest:</strong> equity curve is cash-only and steps on exit days; price chart shows entries/exits.</li>
+              <li><strong>Read the tiles:</strong> values that are generally good appear <span className="text-up font-medium">green</span>; unfavorable values are <span className="text-down font-medium">red</span>.</li>
+              <li><strong>Optimizer Insights:</strong> quick, strategy-aware tweaks and small parameter sweeps to explore next.</li>
+              <li><strong>Assumptions:</strong> daily closes only; no fees/slippage/leverage; one position at a time.</li>
+            </ul>
           </div>
 
           {/* Peek & symbols */}
@@ -453,11 +492,11 @@ export default function App() {
               </label>
               <label className="text-sm">
                 <div className="mb-1 text-[var(--text)]/80">Start</div>
-                <input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} max={ydayISO} />
+                <input className="input" type="date" value={start} onChange={(e) => onStartChange(e.target.value)} max={ydayISO} />
               </label>
               <label className="text-sm">
                 <div className="mb-1 text-[var(--text)]/80">End</div>
-                <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} max={ydayISO} />
+                <input className="input" type="date" value={end} onChange={(e) => onEndChange(e.target.value)} max={ydayISO} />
               </label>
             </div>
 
@@ -896,13 +935,11 @@ function OptimizerPanel({
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
   const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
-  // ---- Strategy-aware suggestions ----
   const sugg: string[] = [];
   const mdd = result.metrics.max_drawdown;
   const ann = result.metrics.annualized_return;
   const hdCfg = Number(result.params.hold_days || 0);
 
-  // generic health checks
   if (trades.length < 5) sugg.push("Few trades — widen date range or loosen entry to collect more samples.");
   if (expectancy <= 0 && trades.length >= 5) sugg.push("Negative expectancy — nudge entries tighter or exits sooner to cut losers faster.");
   if (profitFactor < 1 && trades.length >= 5) sugg.push("Profit factor < 1 — improve R/R by tightening entries or shortening holds.");
@@ -910,7 +947,6 @@ function OptimizerPanel({
   if (Math.abs(ann) < 0.02 && trades.length >= 10) sugg.push("Low annualized return — sweep nearby parameters (small grid).");
   if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) sugg.push("Average bars exceed configured hold — verify alignment or use fixed-bars exit.");
 
-  // strategy-specific nudges
   if (strategy === "breakout") {
     sugg.unshift("Breakout: try threshold ±2–5% around suggested and hold 2–5 days.");
   } else if (strategy === "sma_cross") {
@@ -944,18 +980,13 @@ function OptimizerPanel({
     </div>
   );
 }
-/* Short, wide metric row with adaptive value sizing */
 function MetricRow({ label, value, numeric, tint = false }: { label: string; value: string; numeric?: number; tint?: boolean }) {
   const s = String(value);
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
-
   const valueSize =
-    significantLen > 12
-      ? "text-base sm:text-lg"
-      : significantLen > 9
-      ? "text-lg sm:text-xl"
+    significantLen > 12 ? "text-base sm:text-lg"
+      : significantLen > 9 ? "text-lg sm:text-xl"
       : "text-xl sm:text-2xl";
-
   const tone =
     tint && Number.isFinite(numeric)
       ? (numeric! > 0 ? "text-up" : numeric! < 0 ? "text-down" : "text-[var(--text)]")
