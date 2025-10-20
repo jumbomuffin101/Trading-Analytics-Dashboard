@@ -859,7 +859,7 @@ export default function App() {
                             <Label value="Date" position="bottom" offset={24} fill={PALETTE.axis} />
                           </XAxis>
                           <YAxis stroke={PALETTE.axis} tickFormatter={fmtMoney} tickMargin={10}>
-                            <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-28} dy={10} fill={PALETTE.axis} />
+                            <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-34} dy={18} fill={PALETTE.axis} />
                           </YAxis>
                           <Tooltip
                             contentStyle={{
