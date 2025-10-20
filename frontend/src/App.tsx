@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect } from "react";
+﻿import { useMemo, useState, useEffect, useRef } from "react";
 import axios from "axios";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -143,16 +143,32 @@ type BacktestResponse = {
 
 type StrategyKey = "breakout" | "sma_cross" | "mean_rev";
 
-/* ===== Sample index (extend as you like) ===== */
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
-const COMMON_SYMBOLS = [
-  "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","BRK.B","JPM","V","UNH","XOM","AVGO",
-  "PG","LLY","MA","COST","HD","JNJ","MRK","ABBV","PEP","BAC","KO","PFE","DIS","WMT","CSCO",
-  "ORCL","ADBE","CRM","NKE","AMD","NFLX","QCOM","INTC","TXN","AMAT","T","VZ","IBM","GE",
-  "BA","CAT","MCD","SBUX","LOW","CVX","SPY","QQQ","DIA","IWM","GLD","SLV","TLT","^GSPC","^NDX"
+
+/* ========= Big default symbol set (fallback). Add /public/symbols.json to load “pretty much every stock”. ========= */
+const DEFAULT_SYMBOLS: string[] = [
+  // Core index & megacaps
+  "A","AA","AAPL","ABBV","ABNB","ABT","ACN","ADBE","ADI","ADM","ADP","ADSK","AEP","AIG","ALB","ALL","AMAT","AMD","AMGN","AMP","AMT","AMZN","ANET","ANTM","APA","APD","APH","ASML","ATVI","AVGO","AXP",
+  "BA","BAC","BAX","BBY","BDX","BIIB","BK","BKNG","BLK","BMY","BRK.B","BSX","C","CARR","CAT","CB","CCI","CCL","CDNS","CDW","CE","CELH","CHTR","CL","CMCSA","CME","COF","COIN","COP","COST","CRM","CRWD","CSCO","CSX","CTAS","CTSH","CTVA","CVS","CVX",
+  "DD","DE","DELL","DHI","DHR","DIS","DKNG","DOW","DPZ","DUK","DVN",
+  "EA","EL","EMR","ENPH","ETN","ETSY","EW","EXC",
+  "F","FDX","FI","FIS","FISV","FOX","FOXA","FTNT",
+  "GE","GILD","GIS","GLD","GM","GOOG","GOOGL","GPN","GS",
+  "HD","HES","HON","HPE","HPQ","HUM",
+  "IBM","ICE","ILMN","INTC","INTU","ISRG",
+  "JNJ","JPM","KHC","KMI","KO","KR","LIN","LMT","LOW","LRCX","LULU","LUV","LYFT",
+  "MA","MAR","MCD","MCHP","MCO","MDB","MDLZ","MDT","META","MET","MMM","MO","MRK","MRNA","MRVL","MS","MSFT","MU",
+  "NFLX","NKE","NOC","NOW","NUE","NVDA","NVO",
+  "OKTA","ORCL","OXY","PANW","PARA","PAYC","PAYX","PEP","PFE","PG","PLD","PLTR","PM","PNC","PYPL",
+  "QCOM","QQQ",
+  "REGN","RIVN","ROKU","ROP",
+  "SBUX","SCHW","SHOP","SMCI","SNOW","SO","SPG","SPGI","SPY","SQ","T","TECL","TEAM","TEL","TGT","TJX","TMUS","TSLA","TSM","TTD","TXN",
+  "UAL","UBER","UNH","UNP","UPS","V","VLO","VRSK","VRTX","VZ",
+  "WBA","WBD","WDAY","WELL","WFC","WMT","XLE","XLF","XLK","XOM","ZM",
+  // Add more as you like; /symbols.json will be merged in automatically.
 ];
 
-/* ===== Formatting ===== */
+// Format YYYY-MM-DD exactly as entered (no timezone shifts)
 const fmtDate = (iso: string) => {
   if (!iso) return "";
   const [y, m, d] = iso.split("-").map(Number);
@@ -164,6 +180,7 @@ const fmtDate = (iso: string) => {
     timeZone: "UTC",
   }).format(dt);
 };
+
 const fmtMoney  = (v:number) => Number.isFinite(v) ? "$" + Math.round(v).toLocaleString() : "";
 const fmtMoney2 = (v:number) => Number.isFinite(v) ? "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
 const fmtPct1   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(1) + "%" : "";
@@ -175,7 +192,7 @@ const fmtSignedMoney2 = (v:number) =>
 type ChartMode = "equity" | "price";
 type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 
-/* ========== Terminal palette ========== */
+/* ========== Terminal palette for Recharts ========== */
 const PALETTE = {
   grid: "var(--grid)",
   axis: "var(--muted)",
@@ -183,8 +200,9 @@ const PALETTE = {
   tooltipBorder: "var(--border)",
   text: "var(--text)",
   priceLine: "var(--cyan)",
-  equityLine: "#F5C400", // Bloomberg-ish yellow
-  equityFill: "rgba(245,196,0,0.14)",
+  // Make equity identical to price:
+  equityLine: "var(--cyan)",
+  equityFill: "rgba(0, 184, 212, 0.14)", // fallback alpha; gradient will still use priceLine below
   up: "var(--up)",
   down: "var(--down)",
   threshold: "var(--accent)",
@@ -199,6 +217,7 @@ function Spinner({ size = 16 }: { size?: number }) {
     </svg>
   );
 }
+
 function ErrorBanner({ msg, onClose }: { msg: string; onClose?: () => void }) {
   return (
     <div className="rounded-lg border border-[var(--down)]/50 bg-[var(--down)]/10 text-down px-3 py-2 flex items-start justify-between">
@@ -211,6 +230,7 @@ function ErrorBanner({ msg, onClose }: { msg: string; onClose?: () => void }) {
     </div>
   );
 }
+
 function SkeletonCard() {
   return (
     <div className="p-6 rounded-xl border border-[var(--border)] bg-[var(--panel)]">
@@ -220,8 +240,159 @@ function SkeletonCard() {
   );
 }
 
-/* ======= Tab labels ======= */
-type AppTab = "docs" | "peek" | "strategy" | "results" | "trades" | "drawdown";
+/* ======= Sections + Tabs ======= */
+const SECTIONS = [
+  { id: "docs", label: "Docs" },
+  { id: "peek", label: "Peek" },
+  { id: "strategy", label: "Strategy" },
+  { id: "results", label: "Results" },
+  { id: "trades", label: "Trades" },
+  { id: "drawdown", label: "Drawdown" },
+] as const;
+
+function useActiveSection() {
+  const [active, setActive] = useState<string>("docs");
+  const observer = useRef<IntersectionObserver | null>(null);
+
+  useEffect(() => {
+    const opts = { root: null, rootMargin: "0px 0px -70% 0px", threshold: [0, 0.2, 0.6] };
+    const cb: IntersectionObserverCallback = (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) setActive(entry.target.id);
+      });
+    };
+    observer.current = new IntersectionObserver(cb, opts);
+    SECTIONS.forEach(({ id }) => {
+      const el = document.getElementById(id);
+      if (el) observer.current?.observe(el);
+    });
+    return () => observer.current?.disconnect();
+  }, []);
+  return active;
+}
+
+function TabBar({ active }: { active: string }) {
+  const scrollTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  return (
+    <div className="sticky top-0 z-20 bg-[var(--bg)]/80 backdrop-blur border-b border-[var(--border)]">
+      <div className="mx-auto max-w-6xl px-4 py-2 flex flex-wrap gap-2">
+        {SECTIONS.map(({ id, label }) => {
+          const isActive = active === id;
+          return (
+            <button
+              key={id}
+              onClick={() => scrollTo(id)}
+              className={
+                "px-3 py-1.5 rounded-full text-sm transition border " +
+                (isActive
+                  ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_0_0_2px_rgba(245,196,0,0.2)]"
+                  : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)]")
+              }
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ======= Symbol Index (Searchable) ======= */
+function useSymbols() {
+  const [symbols, setSymbols] = useState<string[]>(() =>
+    [...new Set(DEFAULT_SYMBOLS.concat(PRESETS))].sort()
+  );
+  useEffect(() => {
+    // If you add /public/symbols.json with ["AAPL","MSFT",...],
+    // this will merge and de-dup with DEFAULT_SYMBOLS.
+    fetch(`${import.meta.env.BASE_URL}symbols.json`)
+      .then(r => (r.ok ? r.json() : Promise.reject()))
+      .then((arr: string[]) => {
+        if (Array.isArray(arr)) {
+          const merged = [...new Set([...symbols, ...arr.map(s => String(s).toUpperCase())])].sort();
+          setSymbols(merged);
+        }
+      })
+      .catch(() => { /* optional */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return symbols;
+}
+
+function SymbolIndex({
+  value,
+  onPick,
+}: {
+  value: string;
+  onPick: (s: string) => void;
+}) {
+  const all = useSymbols();
+  const [q, setQ] = useState("");
+  const filtered = useMemo(() => {
+    const term = q.trim().toUpperCase();
+    const base = all;
+    if (!term) return base;
+    return base.filter((s) => s.includes(term));
+  }, [q, all]);
+
+  // Group by first letter
+  const groups = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const s of filtered) {
+      const k = /^[A-Z]/.test(s[0]) ? s[0] : "#";
+      if (!m.has(k)) m.set(k, []);
+      m.get(k)!.push(s);
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filtered]);
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3 lg:sticky lg:top-16 h-max">
+      <div className="text-sm font-semibold text-[var(--text)] mb-2">Symbol Index</div>
+      <input
+        className="input mb-3"
+        placeholder="Search (e.g. NVDA)"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="max-h-[360px] overflow-auto pr-1">
+        {groups.map(([letter, list]) => (
+          <div key={letter} className="mb-2">
+            <div className="text-xs text-[var(--muted)] mb-1">{letter}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {list.map((sym) => {
+                const active = value === sym;
+                return (
+                  <button
+                    key={sym}
+                    className={
+                      "px-2 py-1 rounded-md border text-xs " +
+                      (active
+                        ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]"
+                        : "bg-[var(--bg)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)]")
+                    }
+                    onClick={() => onPick(sym)}
+                    type="button"
+                    title={sym}
+                  >
+                    {sym}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 text-[10px] text-[var(--muted)]">
+        Tip: Add a large <code>public/symbols.json</code> to load more tickers.
+      </div>
+    </div>
+  );
+}
 
 /* ========== Main App ========== */
 export default function App() {
@@ -229,8 +400,6 @@ export default function App() {
   const yday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   const ydayISO = yday.toISOString().slice(0,10);
   const startISO = new Date(yday.getFullYear(), yday.getMonth(), yday.getDate() - 120).toISOString().slice(0,10);
-
-  const [active, setActive] = useState<AppTab>("docs");
 
   const [symbol, setSymbol] = useState("");
   const [start, setStart]   = useState(startISO);
@@ -254,17 +423,19 @@ export default function App() {
   const [slow, setSlow] = useState("30");
   const [revDropPct, setRevDropPct] = useState("2.0");
 
-  // ----- date guards -----
+  // ---- NEW: date guards (never allow start > end) ----
   const onStartChange = (v: string) => {
-    setStart(v);
-    if (v > end) setEnd(v);
+    const newStart = v;
+    setStart(newStart);
+    if (newStart > end) setEnd(newStart);
   };
   const onEndChange = (v: string) => {
-    setEnd(v);
-    if (v < start) setStart(v);
+    const newEnd = v;
+    setEnd(newEnd);
+    if (newEnd < start) setStart(newEnd);
   };
 
-  // reset results when symbol changes
+  // ---- NEW: reset results when symbol changes ----
   useEffect(() => {
     setPeek(null);
     setResult(null);
@@ -296,7 +467,6 @@ export default function App() {
       if (isFinite(res.data?.suggested_threshold)) {
         setThreshold(res.data.suggested_threshold.toFixed(2));
       }
-      setActive("strategy");
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? e.message);
       setPeek(null);
@@ -328,7 +498,6 @@ export default function App() {
       };
       const res = await api.post<BacktestResponse>("/backtest", payload);
       setResult(res.data);
-      setActive("results");
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? e.message);
     } finally {
@@ -374,18 +543,8 @@ export default function App() {
     else { setSortKey(key); setSortDir("asc"); }
   };
 
-  // ------- drawdown fallback: never empty -------
-  const safeEquityCurve =
-    (result?.equity_curve?.length ?? 0) > 1
-      ? result!.equity_curve
-      : result
-      ? [
-          { date: result.start || start, equity: result.metrics.initial_equity ?? 1000 },
-          { date: result.end || end, equity: result.metrics.final_equity ?? result.metrics.initial_equity ?? 1000 },
-        ]
-      : [];
+  const activeSection = useActiveSection();
 
-  /* ===================== UI ===================== */
   return (
     <div className="theme-terminal">
       <div className="page-root min-h-screen bg-[var(--bg)] text-[var(--text)]">
@@ -395,292 +554,274 @@ export default function App() {
               <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">
                 $
               </div>
-              <h1 className="text-4xl font-bold">Signal Studio — Backtest Workbench</h1>
+              <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
             </div>
           </div>
         </div>
 
-        {/* Top tabs: no page scrolling needed */}
-        <div className="sticky top-0 z-20 bg-[var(--bg)]/90 backdrop-blur border-b border-[var(--border)]">
-          <div className="mx-auto max-w-6xl px-4 py-2 flex flex-wrap gap-2">
-            {[
-              {id:"docs",label:"Docs"},
-              {id:"peek",label:"Peek"},
-              {id:"strategy",label:"Strategy"},
-              {id:"results",label:"Results"},
-              {id:"trades",label:"Trades"},
-              {id:"drawdown",label:"Drawdown"},
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => setActive(t.id as AppTab)}
-                className={
-                  "px-3 py-1.5 rounded-full text-sm transition border " +
-                  (active===t.id
-                    ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_0_0_2px_rgba(245,196,0,0.2)]"
-                    : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)]")
-                }
-              >
-                {t.label}
-              </button>
-            ))}
+        {/* Pretty, pill-style nav tabs */}
+        <TabBar active={activeSection} />
+
+        <div className="mx-auto max-w-6xl px-4 pt-6 pb-10 space-y-8">
+          {/* =================== Documentation =================== */}
+          <div id="docs" className="card p-6 sm:p-7">
+            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
+            <ul className="mt-3 text-sm text-[var(--text)]/80 leading-6 list-disc pl-5 space-y-1">
+              <li><strong>Pick a symbol & dates:</strong> use presets or type your own; dates are auto-corrected so Start ≤ End.</li>
+              <li><strong>Peek:</strong> fetches a quick snapshot with min/median/max closes and a <em>suggested threshold</em>.</li>
+              <li><strong>Choose a strategy:</strong> Breakout (threshold + hold days), SMA Crossover (fast/slow), or Mean Reversion (drop% + hold).</li>
+              <li><strong>Run Backtest:</strong> equity curve is cash-only and steps on exit days; price chart shows entries/exits.</li>
+              <li><strong>Read the tiles:</strong> values that are generally good appear <span className="text-up font-medium">green</span>; unfavorable values are <span className="text-down font-medium">red</span>.</li>
+              <li><strong>Optimizer Insights:</strong> quick, strategy-aware tweaks and small parameter sweeps to explore next.</li>
+              <li><strong>Assumptions:</strong> daily closes only; no fees/slippage/leverage; one position at a time.</li>
+            </ul>
           </div>
-        </div>
 
-        <div className="mx-auto max-w-6xl px-4 pt-6 pb-10">
-          {/* ===== DOCS TAB ===== */}
-          {active === "docs" && (
-            <div className="card p-6 sm:p-7">
-              <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
-              <ul className="mt-3 text-sm text-[var(--text)]/80 leading-6 list-disc pl-5 space-y-1">
-                <li><strong>Pick a symbol & dates:</strong> presets on top; Start is always ≤ End (auto-corrected).</li>
-                <li><strong>Peek:</strong> previews the data range and suggests a threshold (75th percentile of closes).</li>
-                <li><strong>Strategy:</strong> choose Breakout, SMA Crossover, or Mean Reversion and fill parameters.</li>
-                <li><strong>Backtest:</strong> equity is cash-only and steps on exit days; price chart shows entries/exits.</li>
-                <li><strong>Read tiles fast:</strong> positive/“good” values are <span className="text-up font-medium">green</span>; adverse values are <span className="text-down font-medium">red</span>.</li>
-                <li><strong>Optimizer:</strong> strategy-aware suggestions and simple parameter sweeps to try next.</li>
-                <li><strong>Assumptions:</strong> daily closes; no fees/slippage/leverage; one position at a time.</li>
-              </ul>
-            </div>
-          )}
+          {/* Peek & symbols + Symbol Index */}
+          <div id="peek" className="card p-6 sm:p-7">
+            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Peek &amp; Symbols</h3>
+            <div className="text-xs text-[var(--muted)] mt-1 mb-3">Type or pick a symbol, choose dates, and click Peek.</div>
 
-          {/* ===== PEEK TAB ===== */}
-          {active === "peek" && (
-            <div className="card p-6 sm:p-7">
-              <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Peek &amp; Symbols</h3>
-              <div className="text-xs text-[var(--muted)] mt-1 mb-3">Type or pick a symbol, choose dates, and click Peek.</div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                {/* left: controls */}
-                <div className="lg:col-span-3">
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {PRESETS.map((sym) => (
-                      <button
-                        key={sym}
-                        className={"chip " + (symbol === sym ? "active" : "")}
-                        onClick={() => setSymbol(sym)}
-                        type="button"
-                      >
-                        {sym}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">Symbol</div>
-                      <input
-                        className="input"
-                        value={symbol}
-                        onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                        list="symbols"
-                        placeholder="e.g. AAPL"
-                      />
-                      <datalist id="symbols">{PRESETS.map((s) => <option key={s} value={s} />)}</datalist>
-                    </label>
-                    <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">Start</div>
-                      <input className="input" type="date" value={start} onChange={(e) => onStartChange(e.target.value)} max={ydayISO} />
-                    </label>
-                    <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">End</div>
-                      <input className="input" type="date" value={end} onChange={(e) => onEndChange(e.target.value)} max={ydayISO} />
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3 mt-4 items-center">
-                    <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
-                      {peekBusy ? (<><Spinner /><span className="ml-2">Peeking…</span></>) : "Peek"}
-                    </button>
-                  </div>
-
-                  {error && <div className="mt-3"><ErrorBanner msg={error} onClose={()=>setError(null)} /></div>}
-                  {peekBusy && !peek && <div className="mt-4"><SkeletonCard /></div>}
-
-                  {peek && (
-                    <div className="mt-6 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="text-xl font-semibold text-[var(--accent)]">{peek.symbol} Market Snapshot</h4>
-                          <div className="text-sm text-[var(--muted)]">
-                            {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
-                            {(peek.start && peek.end) && (peek.start !== start || peek.end !== end) && (
-                              <span className="ml-2 text-xs text-[var(--muted)]/70">
-                                (data span {fmtDate(peek.start)} – {fmtDate(peek.end)})
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-sm text-[var(--muted)]">Rows: {peek.rows}</div>
-                      </div>
-                      <div className="grid sm:grid-cols-4 gap-4">
-                        <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
-                        <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
-                        <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
-                        <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* right: Symbol Index */}
-                <div className="lg:col-span-2">
-                  <SymbolIndex
-                    list={COMMON_SYMBOLS}
-                    current={symbol}
-                    onPick={(s) => setSymbol(s)}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ===== STRATEGY TAB ===== */}
-          {active === "strategy" && (
-            <div className="card p-6 sm:p-7">
-              <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy & Parameters</h3>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
-                  <label className="text-sm sm:col-span-2">
-                    <div className="mb-1 text-[var(--text)]/80">Strategy</div>
-                    <select
-                      className="input"
-                      value={strategy}
-                      onChange={(e) => setStrategy(e.target.value as StrategyKey)}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left: controls and presets (span 2 columns on large screens) */}
+              <div className="lg:col-span-2">
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {PRESETS.map((sym) => (
+                    <button
+                      key={sym}
+                      className={"chip " + (symbol === sym ? "active" : "")}
+                      onClick={() => setSymbol(sym)}
+                      type="button"
                     >
-                      <option value="breakout">Breakout (threshold)</option>
-                      <option value="sma_cross">SMA Crossover</option>
-                      <option value="mean_rev">Mean Reversion</option>
-                    </select>
-                  </label>
-
-                  {strategy === "breakout" && (
-                    <>
-                      <label className="text-sm">
-                        <div className="mb-1 text-[var(--text)]/80">Threshold</div>
-                        <input
-                          className={"input " + (thrInvalid ? "ring-2 ring-[var(--down)]" : "")}
-                          inputMode="decimal"
-                          step="any"
-                          value={threshold}
-                          onChange={(e) => setThreshold(e.target.value)}
-                          placeholder="e.g. 185.75"
-                        />
-                      </label>
-                      <label className="text-sm">
-                        <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
-                        <input
-                          className={"input " + (hdInvalid ? "ring-2 ring-[var(--down)]" : "")}
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          min={1}
-                          value={holdDays}
-                          onChange={(e) => setHoldDays(e.target.value)}
-                          placeholder=">= 1"
-                        />
-                      </label>
-                    </>
-                  )}
-
-                  {strategy === "sma_cross" && (
-                    <>
-                      <label className="text-sm">
-                        <div className="mb-1 text-[var(--text)]/80">Fast SMA</div>
-                        <input className="input" inputMode="numeric" value={fast} onChange={(e)=>setFast(e.target.value)} placeholder="e.g. 10" />
-                      </label>
-                      <label className="text-sm">
-                        <div className="mb-1 text-[var(--text)]/80">Slow SMA</div>
-                        <input className="input" inputMode="numeric" value={slow} onChange={(e)=>setSlow(e.target.value)} placeholder="e.g. 30" />
-                      </label>
-                    </>
-                  )}
-
-                  {strategy === "mean_rev" && (
-                    <>
-                      <label className="text-sm">
-                        <div className="mb-1 text-[var(--text)]/80">Drop % (from recent close)</div>
-                        <input className="input" inputMode="decimal" step="any" value={revDropPct} onChange={(e)=>setRevDropPct(e.target.value)} placeholder="e.g. 2.0" />
-                      </label>
-                      <label className="text-sm">
-                        <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
-                        <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={(e)=>setHoldDays(e.target.value)} placeholder=">= 1" />
-                      </label>
-                    </>
-                  )}
-
-                  <div className="sm:col-span-2 flex items-center gap-3">
-                    <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doBacktest} disabled={loading || !canPeek}>
-                      {loading ? (<><Spinner /><span className="ml-2">Running…</span></>) : "Run Backtest"}
+                      {sym}
                     </button>
-                  </div>
+                  ))}
                 </div>
 
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] leading-6">
-                  <div className="font-semibold text-[var(--text)] mb-1">How this works</div>
-                  <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
-                    {strategy === "breakout" && (
-                      <>
-                        <li>Enter long on first close above <strong>Threshold</strong>; exit after N days.</li>
-                        <li>One position at a time; P&amp;L realized on exits.</li>
-                      </>
-                    )}
-                    {strategy === "sma_cross" && (
-                      <>
-                        <li>Enter long when <strong>Fast SMA</strong> crosses above <strong>Slow SMA</strong>.</li>
-                        <li>Exit on reverse cross (or fixed horizon if modeled by backend).</li>
-                      </>
-                    )}
-                    {strategy === "mean_rev" && (
-                      <>
-                        <li>Enter long after a drop of at least <strong>Drop %</strong> from recent close.</li>
-                        <li>Exit after N days.</li>
-                      </>
-                    )}
-                  </ul>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                  <label className="text-sm">
+                    <div className="mb-1 text-[var(--text)]/80">Symbol</div>
+                    <input
+                      className="input"
+                      value={symbol}
+                      onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                      list="symbols"
+                      placeholder="e.g. AAPL"
+                    />
+                    <datalist id="symbols">{PRESETS.map((s) => <option key={s} value={s} />)}</datalist>
+                  </label>
+                  <label className="text-sm">
+                    <div className="mb-1 text-[var(--text)]/80">Start</div>
+                    <input className="input" type="date" value={start} onChange={(e) => onStartChange(e.target.value)} max={ydayISO} />
+                  </label>
+                  <label className="text-sm">
+                    <div className="mb-1 text-[var(--text)]/80">End</div>
+                    <input className="input" type="date" value={end} onChange={(e) => onEndChange(e.target.value)} max={ydayISO} />
+                  </label>
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* ===== RESULTS TAB ===== */}
-          {active === "results" && result && (
-            <div className="grid lg:grid-cols-3 gap-8 items-stretch">
-              <div className="card p-6 lg:col-span-2 flex flex-col relative">
-                {loading && (
-                  <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center rounded-xl z-10">
-                    <div className="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--panel)] text-sm">
-                      <Spinner /> <span className="ml-2">Crunching numbers…</span>
+                <div className="flex flex-wrap gap-3 mt-4 items-center">
+                  <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
+                    {peekBusy ? (<><Spinner /><span className="ml-2">Peeking…</span></>) : "Peek"}
+                  </button>
+                </div>
+                {error && <div className="mt-3"><ErrorBanner msg={error} onClose={()=>setError(null)} /></div>}
+                {peekBusy && !peek && <div className="mt-4"><SkeletonCard /></div>}
+
+                {peek && (
+                  <div className="mt-5 p-6 rounded-xl border border-[var(--border)] bg-[var(--panel)] space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--accent)]">
+                          {peek.symbol} Market Snapshot
+                        </h3>
+                        <div className="text-sm text-[var(--muted)]">
+                          {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
+                          {(peek.start && peek.end) && (peek.start !== start || peek.end !== end) && (
+                            <span className="ml-2 text-xs text-[var(--muted)]/70">
+                              (data span {fmtDate(peek.start)} – {fmtDate(peek.end)})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-sm text-[var(--muted)]">Rows: {peek.rows}</div>
+                    </div>
+
+                    <div className="grid sm:grid-cols-4 gap-4">
+                      <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
+                      <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
+                      <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
+                      <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile" />
                     </div>
                   </div>
                 )}
+              </div>
 
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Backtest Results</h3>
-                  <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-                    {fmtDate(start)} – {fmtDate(end)} • {result.symbol}
-                    <div className="bg-[var(--panel)] border border-[var(--border)] rounded-lg p-1 ml-3">
-                      <button
-                        className={
-                          "px-3 py-1 rounded-md border " +
-                          (mode === "equity"
-                            ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]"
-                            : "bg-transparent text-[var(--text)] border-[var(--border)]")
-                        }
-                        onClick={() => setMode("equity")}
-                      >
-                        Equity
-                      </button>
-                      <button
-                        className={
-                          "px-3 py-1 rounded-md border ml-1 " +
-                          (mode === "price"
-                            ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]"
-                            : "bg-transparent text-[var(--text)] border-[var(--border)]")
-                        }
-                        onClick={() => setMode("price")}
-                      >
-                        Price
-                      </button>
+              {/* Right: Symbol Index */}
+              <div className="lg:col-span-1">
+                <SymbolIndex value={symbol} onPick={setSymbol} />
+              </div>
+            </div>
+          </div>
+
+          {/* Strategy & Parameters (dynamic) */}
+          <div id="strategy" className="card p-6 sm:p-7">
+            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy & Parameters</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
+                {/* Strategy */}
+                <label className="text-sm sm:col-span-2">
+                  <div className="mb-1 text-[var(--text)]/80">Strategy</div>
+                  <select
+                    className="input"
+                    value={strategy}
+                    onChange={(e) => setStrategy(e.target.value as StrategyKey)}
+                  >
+                    <option value="breakout">Breakout (threshold)</option>
+                    <option value="sma_cross">SMA Crossover</option>
+                    <option value="mean_rev">Mean Reversion</option>
+                  </select>
+                </label>
+
+                {/* Breakout params */}
+                {strategy === "breakout" && (
+                  <>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Threshold</div>
+                      <input
+                        className={"input " + (thrInvalid ? "ring-2 ring-[var(--down)]" : "")}
+                        inputMode="decimal"
+                        step="any"
+                        value={threshold}
+                        onChange={(e) => setThreshold(e.target.value)}
+                        placeholder="e.g. 185.75"
+                      />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
+                      <input
+                        className={"input " + (hdInvalid ? "ring-2 ring-[var(--down)]" : "")}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        min={1}
+                        value={holdDays}
+                        onChange={(e) => setHoldDays(e.target.value)}
+                        placeholder=">= 1"
+                      />
+                    </label>
+                  </>
+                )}
+
+                {/* SMA Cross params */}
+                {strategy === "sma_cross" && (
+                  <>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Fast SMA</div>
+                      <input className="input" inputMode="numeric" value={fast} onChange={(e)=>setFast(e.target.value)} placeholder="e.g. 10" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Slow SMA</div>
+                      <input className="input" inputMode="numeric" value={slow} onChange={(e)=>setSlow(e.target.value)} placeholder="e.g. 30" />
+                    </label>
+                  </>
+                )}
+
+                {/* Mean Reversion params */}
+                {strategy === "mean_rev" && (
+                  <>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Drop % (from recent close)</div>
+                      <input className="input" inputMode="decimal" step="any" value={revDropPct} onChange={(e)=>setRevDropPct(e.target.value)} placeholder="e.g. 2.0" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
+                      <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={(e)=>setHoldDays(e.target.value)} placeholder=">= 1" />
+                    </label>
+                  </>
+                )}
+
+                <div className="sm:col-span-2 flex items-center gap-3">
+                  <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doBacktest} disabled={loading || !canPeek}>
+                    {loading ? (<><Spinner /><span className="ml-2">Running…</span></>) : "Run Backtest"}
+                  </button>
+                </div>
+              </div>
+
+              {/* How this works (expanded, strategy-aware) */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] leading-6">
+                <div className="font-semibold text-[var(--text)] mb-1">How this works</div>
+                {strategy === "breakout" && (
+                  <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
+                    <li><strong>Intent:</strong> catch momentum when price <em>closes above</em> a user-set <strong>Threshold</strong>.</li>
+                    <li><strong>Entry:</strong> first daily close &gt;= Threshold opens a single long position next bar (close→close model).</li>
+                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong> bars; P&L realized only on exits.</li>
+                    <li><strong>Tip:</strong> start near Peek’s <em>Suggested Threshold</em> (75th percentile close), then sweep ±2–5%.</li>
+                    <li><strong>Notes:</strong> one position at a time; no slippage/fees; daily data only.</li>
+                  </ul>
+                )}
+                {strategy === "sma_cross" && (
+                  <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
+                    <li><strong>Intent:</strong> ride trends when short-term average outruns long-term average.</li>
+                    <li><strong>Entry:</strong> go long when <strong>Fast SMA</strong> crosses above <strong>Slow SMA</strong> (golden cross).</li>
+                    <li><strong>Exit:</strong> on reverse cross (death cross). Backend may support fixed-horizon exit variants.</li>
+                    <li><strong>Tip:</strong> try (5/20), (10/30), (20/50). Requiring price &gt; Slow SMA can reduce chop.</li>
+                    <li><strong>Notes:</strong> one position max; daily closes; no fees/slippage in metrics shown.</li>
+                  </ul>
+                )}
+                {strategy === "mean_rev" && (
+                  <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
+                    <li><strong>Intent:</strong> buy dips expecting a short-term snap-back.</li>
+                    <li><strong>Entry:</strong> long when price drops at least <strong>Drop %</strong> from the prior close (or recent ref), next bar open/close modeled as daily.</li>
+                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong>; optional threshold/MA target exits can be added later.</li>
+                    <li><strong>Tip:</strong> sweep Drop % in 1–4% and Hold Days in 2–4 for balanced exposure.</li>
+                    <li><strong>Notes:</strong> single position; no fees/slippage; daily data.</li>
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Backtest Results */}
+          {result && (
+            <>
+              <div id="results" className="grid lg:grid-cols-3 gap-8 items-stretch">
+                <div className="card p-6 lg:col-span-2 flex flex-col relative">
+                  {loading && (
+                    <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center rounded-xl z-10">
+                      <div className="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--panel)] text-sm">
+                        <Spinner /> <span className="ml-2">Crunching numbers…</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Backtest Results</h3>
+                    <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                      {fmtDate(start)} – {fmtDate(end)} • {result.symbol}
+                      <div className="bg-[var(--panel)] border border-[var(--border)] rounded-lg p-1 ml-3">
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border " +
+                            (mode === "equity"
+                              ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]"
+                              : "bg-transparent text-[var(--text)] border-[var(--border)]")
+                          }
+                          onClick={() => setMode("equity")}
+                        >
+                          Equity
+                        </button>
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border ml-1 " +
+                            (mode === "price"
+                              ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]"
+                              : "bg-transparent text-[var(--text)] border-[var(--border)]")
+                          }
+                          onClick={() => setMode("price")}
+                        >
+                          Price
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -689,9 +830,10 @@ export default function App() {
                       {mode === "equity" ? (
                         <AreaChart data={result?.equity_curve ?? []} margin={{ left: 68, right: 16, top: 10, bottom: 38 }}>
                           <defs>
+                            {/* Gradient uses the same stroke color as price */}
                             <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={PALETTE.equityLine} stopOpacity={0.28} />
-                              <stop offset="95%" stopColor={PALETTE.equityLine} stopOpacity={0.04} />
+                              <stop offset="5%" stopColor={PALETTE.priceLine} stopOpacity={0.28} />
+                              <stop offset="95%" stopColor={PALETTE.priceLine} stopOpacity={0.04} />
                             </linearGradient>
                           </defs>
                           <CartesianGrid stroke={PALETTE.grid} vertical={false} />
@@ -710,7 +852,8 @@ export default function App() {
                             }}
                             formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
                           />
-                          <Area type="monotone" dataKey="equity" stroke={PALETTE.equityLine} fill="url(#eqFill)" strokeWidth={2} />
+                          {/* stroke identical to price */}
+                          <Area type="monotone" dataKey="equity" stroke={PALETTE.priceLine} fill="url(#eqFill)" strokeWidth={2} />
                         </AreaChart>
                       ) : (
                         <LineChart data={result?.price_series ?? []} margin={{ left: 72, right: 16, top: 10, bottom: 38 }}>
@@ -719,7 +862,7 @@ export default function App() {
                             <Label value="Date" position="bottom" offset={24} fill={PALETTE.axis} />
                           </XAxis>
                           <YAxis stroke={PALETTE.axis} tickFormatter={fmtMoney} tickMargin={10}>
-                            <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-20} fill={PALETTE.axis} />
+                            <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-28} dy={10} fill={PALETTE.axis} />
                           </YAxis>
                           <Tooltip
                             contentStyle={{
@@ -762,122 +905,106 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Optimizer + Trades toggle quick link */}
-                <div className="flex flex-col h-full">
+                {/* Trades + Optimizer */}
+                <div id="trades" className="flex flex-col h-full">
                   <div className="card p-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">
+                        Trades ({tradesWithBars.length})
+                      </h3>
+                      <div className="flex gap-2 text-xs text-[var(--muted)]">
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border " +
+                            (tradeView === "cards" ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]" : "border-[var(--border)] text-[var(--text)]")
+                          }
+                          onClick={() => setTradeView("cards")}
+                        >
+                          Cards
+                        </button>
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border " +
+                            (tradeView === "table" ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]" : "border-[var(--border)] text-[var(--text)]")
+                          }
+                          onClick={() => setTradeView("table")}
+                        >
+                          Table
+                        </button>
+                      </div>
+                    </div>
+
+                    {tradeView === "cards" ? (
+                      <div className="overflow-x-auto">
+                        <div className="grid auto-cols-[210px] grid-flow-col gap-4">
+                          {tradesWithBars.map((t, i) => {
+                            const positive = t.pnl >= 0;
+                            return (
+                              <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                                <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
+                                <div className="text-sm text-[var(--text)]/80 space-y-1">
+                                  <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
+                                  <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
+                                  <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
+                                  <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
+                                  <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
+                                  <div className="flex justify-end">
+                                    <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")}>
+                                      {positive ? "Win" : "Loss"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="table text-sm w-full">
+                          <thead>
+                            <tr className="text-[var(--text)]">
+                              <Th onClick={() => toggleSort("entry_date")}>Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th onClick={() => toggleSort("exit_date")}>Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th>Entry</Th><Th>Exit</Th>
+                              <Th onClick={() => toggleSort("pnl")}>PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th onClick={() => toggleSort("return_pct")}>Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th onClick={() => toggleSort("daysBars")}>Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tradesWithBars.map((t, i) => (
+                              <tr key={i} className={t.pnl >= 0 ? "text-up" : "text-down"}>
+                                <td>{t.entry_date}</td><td>{t.exit_date}</td>
+                                <td>{t.entry_price.toFixed(2)}</td><td>{t.exit_price.toFixed(2)}</td>
+                                <td>{t.pnl.toFixed(2)}</td><td>{(t.return_pct * 100).toFixed(2)}%</td>
+                                <td>{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Optimizer Insights */}
+                  {result && (
                     <OptimizerPanel
                       strategy={strategy}
                       result={result}
                       trades={(tradesWithBars as any) as (Trade & { daysBars?: number })[]}
                     />
-                    <div className="mt-4">
-                      <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={()=>setActive("trades")}>
-                        View Trades
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ===== TRADES TAB ===== */}
-          {active === "trades" && result && (
-            <div className="card p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">
-                  Trades ({(result.trades ?? []).length})
-                </h3>
-                <div className="flex gap-2 text-xs text-[var(--muted)]">
-                  <button
-                    className={
-                      "px-3 py-1 rounded-md border " +
-                      (tradeView === "cards" ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]" : "border-[var(--border)] text-[var(--text)]")
-                    }
-                    onClick={() => setTradeView("cards")}
-                  >
-                    Cards
-                  </button>
-                  <button
-                    className={
-                      "px-3 py-1 rounded-md border " +
-                      (tradeView === "table" ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]" : "border-[var(--border)] text-[var(--text)]")
-                    }
-                    onClick={() => setTradeView("table")}
-                  >
-                    Table
-                  </button>
+                  )}
                 </div>
               </div>
 
-              {tradeView === "cards" ? (
-                <div className="overflow-x-auto">
-                  <div className="grid auto-cols-[210px] grid-flow-col gap-4">
-                    {tradesWithBars.map((t, i) => {
-                      const positive = t.pnl >= 0;
-                      return (
-                        <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-                          <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
-                          <div className="text-sm text-[var(--text)]/80 space-y-1">
-                            <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
-                            <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
-                            <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
-                            <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
-                            <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
-                            <div className="flex justify-end">
-                              <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")}>
-                                {positive ? "Win" : "Loss"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="table text-sm w-full">
-                    <thead>
-                      <tr className="text-[var(--text)]">
-                        <Th onClick={() => toggleSort("entry_date")}>Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                        <Th onClick={() => toggleSort("exit_date")}>Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                        <Th>Entry</Th><Th>Exit</Th>
-                        <Th onClick={() => toggleSort("pnl")}>PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                        <Th onClick={() => toggleSort("return_pct")}>Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                        <Th onClick={() => toggleSort("daysBars")}>Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tradesWithBars.map((t, i) => (
-                        <tr key={i} className={t.pnl >= 0 ? "text-up" : "text-down"}>
-                          <td>{t.entry_date}</td><td>{t.exit_date}</td>
-                          <td>{t.entry_price.toFixed(2)}</td><td>{t.exit_price.toFixed(2)}</td>
-                          <td>{t.pnl.toFixed(2)}</td><td>{(t.return_pct * 100).toFixed(2)}%</td>
-                          <td>{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+              <div id="drawdown">
+                <DrawdownChart equity={result.equity_curve} />
+              </div>
+            </>
           )}
 
-          {/* ===== DRAWDOWN TAB ===== */}
-          {active === "drawdown" && result && (
-            <div className="card p-6">
-              <DrawdownChart equity={safeEquityCurve} />
-            </div>
-          )}
-
-          {active !== "docs" && !result && (active === "results" || active === "trades" || active === "drawdown") && (
-            <div className="text-center text-sm text-[var(--muted)] mt-6">
-              No backtest yet. Run <span className="font-semibold">Peek</span> then <span className="font-semibold">Backtest</span>.
-            </div>
-          )}
-
-          <div className="text-center text-xs text-[var(--muted)] mt-8">
+          <div className="text-center text-xs text-[var(--muted)]">
             Created by <span className="font-semibold">Aryan Rawat</span>
           </div>
         </div>
@@ -905,6 +1032,7 @@ function Stat({
     </div>
   );
 }
+
 function Row({ k, v, tone }: { k: string; v: any; tone?: "win" | "loss" }) {
   const c = tone === "win" ? "text-up" : tone === "loss" ? "text-down" : "text-[var(--text)]/80";
   return <div className={`flex justify-between ${c}`}><span>{k}</span><span className="tabular-nums">{v}</span></div>;
@@ -913,7 +1041,7 @@ function Th({ children, onClick }: { children: any; onClick?: () => void }) {
   return <th className="cursor-pointer text-[var(--text)]/90" onClick={onClick}>{children}</th>;
 }
 
-/* ========== Optimizer Panel ========== */
+/* ========== Optimizer Panel (vertical tiles + real suggestions) ========== */
 function OptimizerPanel({
   strategy,
   result,
@@ -964,7 +1092,7 @@ function OptimizerPanel({
   if (sugg.length < 2) sugg.push("Run a quick parameter sweep near current settings.");
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="card p-6 flex-1 flex flex-col">
       <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">
         Optimizer Insights
       </h3>
@@ -1004,55 +1132,6 @@ function MetricRow({ label, value, numeric, tint = false }: { label: string; val
       <div className="text-[11px] sm:text-xs text-[var(--muted)] mr-3">{label}</div>
       <div className={`${valueSize} font-semibold tabular-nums leading-none ${tone}`}>
         {s}
-      </div>
-    </div>
-  );
-}
-
-/* ========== Symbol Index ========== */
-function SymbolIndex({
-  list,
-  current,
-  onPick,
-}: {
-  list: string[];
-  current?: string;
-  onPick: (s: string) => void;
-}) {
-  const [q, setQ] = useState("");
-  const filtered = useMemo(() => {
-    const s = q.trim().toUpperCase();
-    if (!s) return list;
-    return list.filter(x => x.toUpperCase().includes(s));
-  }, [q, list]);
-
-  return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 h-full">
-      <div className="text-sm font-semibold text-[var(--text)] mb-2">Symbol Index</div>
-      <input
-        className="input mb-3"
-        placeholder="Search symbols…"
-        value={q}
-        onChange={(e)=>setQ(e.target.value)}
-      />
-      <div className="max-h-[360px] overflow-auto pr-1">
-        {filtered.map((s) => (
-          <button
-            key={s}
-            onClick={()=>onPick(s)}
-            className={
-              "w-full text-left px-3 py-2 rounded-md mb-1 border " +
-              (current===s
-                ? "bg-[var(--accent)]/20 border-[var(--accent)] text-[var(--text)]"
-                : "bg-transparent border-[var(--border)] hover:border-[var(--accent)] text-[var(--text)]/90")
-            }
-          >
-            {s}
-          </button>
-        ))}
-        {filtered.length === 0 && (
-          <div className="text-xs text-[var(--muted)] italic px-1">No matches</div>
-        )}
       </div>
     </div>
   );
