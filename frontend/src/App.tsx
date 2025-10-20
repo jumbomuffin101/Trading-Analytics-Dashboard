@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect, useRef } from "react";
+﻿import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -13,7 +13,8 @@ const api = axios.create({ baseURL: BASE, timeout: 25000 });
 
 const n = (x: unknown, d = 2) =>
   +((typeof x === "number" && isFinite(x) ? x : 0).toFixed(d));
-const pick = <T,>(...xs: T[]) => xs.find((v) => v !== undefined && v !== null) as T;
+const pick = <T,>(...xs: T[]) =>
+  xs.find((v) => v !== undefined && v !== null) as T;
 
 function normalizePeek(raw: any) {
   const preview = Array.isArray(raw?.preview) ? raw.preview : [];
@@ -42,7 +43,10 @@ const toPct = (x: unknown) => {
 
 function maxDD(eq: { equity: number }[]) {
   let p = eq[0]?.equity ?? 0, m = 0;
-  for (const x of eq) { if (x.equity > p) p = x.equity; m = Math.min(m, p ? (x.equity - p) / p : 0); }
+  for (const x of eq) {
+    if (x.equity > p) p = x.equity;
+    m = Math.min(m, p ? (x.equity - p) / p : 0);
+  }
   return Math.abs(m);
 }
 
@@ -68,13 +72,16 @@ function normalizeBacktest(raw: any, req: any) {
     : +pick(raw?.params?.hold_days, raw?.hold_days, 0);
 
   const initial_equity = n(pick(raw?.metrics?.initial_equity, raw?.equity_start, 1000));
-  const lastEq = equity_curve.length ? equity_curve[equity_curve.length - 1].equity : initial_equity;
+  const lastEq = equity_curve.length
+    ? equity_curve[equity_curve.length - 1].equity
+    : initial_equity;
   const final_equity = n(pick(raw?.metrics?.final_equity, raw?.equity_end, lastEq));
   const total_pnl = n(final_equity - initial_equity);
-  const win_rate = n(pick(raw?.metrics?.win_rate, raw?.win_rate_pct, 0), 4) / (raw?.metrics?.win_rate ? 1 : 100);
-
+  const win_rate = n(pick(raw?.metrics?.win_rate, raw?.win_rate_pct, 0), 4) /
+                   (raw?.metrics?.win_rate ? 1 : 100);
   const start = String(raw?.start ?? "");
   const end = String(raw?.end ?? "");
+
   let annualized_return = 0;
   try {
     const yrs = (new Date(end).getTime() - new Date(start).getTime()) / 86400000 / 365;
@@ -113,7 +120,8 @@ function normalizeBacktest(raw: any, req: any) {
 api.interceptors.response.use(
   (r) => {
     const url = String(r?.config?.url || "");
-    const sent = typeof r?.config?.data === "string" ? JSON.parse(r.config.data) : r?.config?.data;
+    const sent =
+      typeof r?.config?.data === "string" ? JSON.parse(r.config.data) : r?.config?.data;
     if (url.endsWith("/peek")) r.data = normalizePeek(r.data ?? {});
     if (url.endsWith("/backtest")) r.data = normalizeBacktest(r.data ?? {}, sent);
     return r;
@@ -129,41 +137,45 @@ type PeekResponse = {
   preview: { date: string; open: number; high: number; low: number; close: number }[];
   note?: string;
 };
+
 type Trade = {
   entry_date: string; entry_price: number;
-  exit_date: string;  exit_price: number;
+  exit_date: string; exit_price: number;
   pnl: number; return_pct: number;
 };
+
 type BacktestResponse = {
   symbol: string; start: string; end: string;
   params: { threshold: number; hold_days: number };
-  metrics: { total_pnl: number; win_rate: number; annualized_return: number; max_drawdown: number; final_equity: number; initial_equity: number };
-  trades: Trade[]; equity_curve: { date: string; equity: number }[]; price_series?: { date: string; close: number }[]; note?: string;
+  metrics: {
+    total_pnl: number; win_rate: number; annualized_return: number;
+    max_drawdown: number; final_equity: number; initial_equity: number
+  };
+  trades: Trade[];
+  equity_curve: { date: string; equity: number }[];
+  price_series?: { date: string; close: number }[];
+  note?: string;
 };
 
 type StrategyKey = "breakout" | "sma_cross" | "mean_rev";
-
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
 
-/* ========= Fallback symbols; /public/symbols.json (if present) is merged in ========= */
+/* ========= Fallback symbols ========= */
 const DEFAULT_SYMBOLS: string[] = [
-  "A","AA","AAPL","ABBV","ABNB","ABT","ACN","ADBE","ADI","ADM","ADP","ADSK","AEP","AIG","ALB","ALL","AMAT","AMD","AMGN","AMP","AMT","AMZN","ANET","APA","APD","APH","ASML","ATVI","AVGO","AXP",
-  "BA","BAC","BAX","BBY","BDX","BIIB","BK","BKNG","BLK","BMY","BRK.B","BSX","C","CARR","CAT","CB","CCI","CCL","CDNS","CDW","CE","CELH","CHTR","CL","CMCSA","CME","COF","COIN","COP","COST","CRM","CRWD","CSCO","CSX","CTAS","CTSH","CTVA","CVS","CVX",
-  "DD","DE","DELL","DHI","DHR","DIS","DKNG","DOW","DPZ","DUK","DVN",
-  "EA","EL","EMR","ENPH","ETN","ETSY","EW","EXC",
-  "F","FDX","FI","FIS","FISV","FOX","FOXA","FTNT",
-  "GE","GILD","GIS","GLD","GM","GOOG","GOOGL","GPN","GS",
-  "HD","HES","HON","HPE","HPQ","HUM",
-  "IBM","ICE","ILMN","INTC","INTU","ISRG",
-  "JNJ","JPM","KHC","KMI","KO","KR","LIN","LMT","LOW","LRCX","LULU","LUV","LYFT",
-  "MA","MAR","MCD","MCHP","MCO","MDB","MDLZ","MDT","META","MET","MMM","MO","MRK","MRNA","MRVL","MS","MSFT","MU",
-  "NFLX","NKE","NOC","NOW","NUE","NVDA","NVO",
-  "OKTA","ORCL","OXY","PANW","PARA","PAYC","PAYX","PEP","PFE","PG","PLD","PLTR","PM","PNC","PYPL",
-  "QCOM","QQQ",
-  "REGN","RIVN","ROKU","ROP",
-  "SBUX","SCHW","SHOP","SMCI","SNOW","SO","SPG","SPGI","SPY","SQ","T","TECL","TEAM","TEL","TGT","TJX","TMUS","TSLA","TSM","TTD","TXN",
-  "UAL","UBER","UNH","UNP","UPS","V","VLO","VRSK","VRTX","VZ",
-  "WBA","WBD","WDAY","WELL","WFC","WMT","XLE","XLF","XLK","XOM","ZM",
+  "A","AA","AAPL","ABBV","ABNB","ABT","ACN","ADBE","ADI","ADM","ADP","ADSK","AEP","AIG","ALB","ALL",
+  "AMAT","AMD","AMGN","AMP","AMT","AMZN","ANET","APA","APD","APH","ASML","ATVI","AVGO","AXP",
+  "BA","BAC","BAX","BBY","BDX","BIIB","BK","BKNG","BLK","BMY","BRK.B","BSX","C","CARR","CAT","CB","CCI",
+  "CCL","CDNS","CDW","CE","CELH","CHTR","CL","CMCSA","CME","COF","COIN","COP","COST","CRM","CRWD","CSCO",
+  "CSX","CTAS","CTSH","CTVA","CVS","CVX","DD","DE","DELL","DHI","DHR","DIS","DKNG","DOW","DPZ","DUK","DVN",
+  "EA","EL","EMR","ENPH","ETN","ETSY","EW","EXC","F","FDX","FI","FIS","FISV","FOX","FOXA","FTNT","GE",
+  "GILD","GIS","GLD","GM","GOOG","GOOGL","GPN","GS","HD","HES","HON","HPE","HPQ","HUM","IBM","ICE","ILMN",
+  "INTC","INTU","ISRG","JNJ","JPM","KHC","KMI","KO","KR","LIN","LMT","LOW","LRCX","LULU","LUV","LYFT","MA",
+  "MAR","MCD","MCHP","MCO","MDB","MDLZ","MDT","META","MET","MMM","MO","MRK","MRNA","MRVL","MS","MSFT","MU",
+  "NFLX","NKE","NOC","NOW","NUE","NVDA","NVO","OKTA","ORCL","OXY","PANW","PARA","PAYC","PAYX","PEP","PFE",
+  "PG","PLD","PLTR","PM","PNC","PYPL","QCOM","QQQ","REGN","RIVN","ROKU","ROP","SBUX","SCHW","SHOP","SMCI",
+  "SNOW","SO","SPG","SPGI","SPY","SQ","T","TECL","TEAM","TEL","TGT","TJX","TMUS","TSLA","TSM","TTD","TXN",
+  "UAL","UBER","UNH","UNP","UPS","V","VLO","VRSK","VRTX","VZ","WBA","WBD","WDAY","WELL","WFC","WMT","XLE",
+  "XLF","XLK","XOM","ZM",
 ];
 
 const fmtDate = (iso: string) => {
@@ -171,19 +183,21 @@ const fmtDate = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
   return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
+    month: "short", day: "numeric", year: "numeric", timeZone: "UTC",
   }).format(dt);
 };
 
-const fmtMoney  = (v:number) => Number.isFinite(v) ? "$" + Math.round(v).toLocaleString() : "";
-const fmtMoney2 = (v:number) => Number.isFinite(v) ? "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+const fmtMoney  = (v:number) =>
+  Number.isFinite(v) ? "$" + Math.round(v).toLocaleString() : "";
+const fmtMoney2 = (v:number) =>
+  Number.isFinite(v)
+    ? "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : "";
 const fmtPct1   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(1) + "%" : "";
 const fmtPct2   = (v:number) => Number.isFinite(v) ? (v*100).toFixed(2) + "%" : "";
 const fmtSignedMoney2 = (v:number) =>
-  !Number.isFinite(v) ? "" : (v >= 0 ? "+" : "−") +
+  !Number.isFinite(v) ? "" :
+  (v >= 0 ? "+" : "−") +
   Math.abs(v).toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 type ChartMode = "equity" | "price";
@@ -197,7 +211,7 @@ const PALETTE = {
   tooltipBorder: "var(--border)",
   text: "var(--text)",
   priceLine: "var(--cyan)",
-  equityLine: "var(--cyan)", // same as price
+  equityLine: "var(--cyan)",
   equityFill: "rgba(0, 184, 212, 0.14)",
   up: "var(--up)",
   down: "var(--down)",
@@ -236,7 +250,7 @@ function SkeletonCard() {
   );
 }
 
-/* ======= Sections + Tabs (Trades merged into Results) ======= */
+/* ======= Sections + Tabs ======= */
 const SECTIONS = [
   { id: "docs", label: "Docs" },
   { id: "peek", label: "Peek" },
@@ -245,7 +259,6 @@ const SECTIONS = [
   { id: "drawdown", label: "Drawdown" },
 ] as const;
 
-
 function useActiveSection() {
   const [active, setActive] = useState<string>("docs");
   const observer = useRef<IntersectionObserver | null>(null);
@@ -253,9 +266,7 @@ function useActiveSection() {
   useEffect(() => {
     const opts = { root: null, rootMargin: "0px 0px -70% 0px", threshold: [0, 0.2, 0.6] };
     const cb: IntersectionObserverCallback = (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) setActive(entry.target.id);
-      });
+      entries.forEach((entry) => { if (entry.isIntersecting) setActive(entry.target.id); });
     };
     observer.current = new IntersectionObserver(cb, opts);
     SECTIONS.forEach(({ id }) => {
@@ -264,25 +275,24 @@ function useActiveSection() {
     });
     return () => observer.current?.disconnect();
   }, []);
+
   return { active, setActive };
 }
 
 function TabBar({ active, setActive }: { active: string; setActive: (id: string) => void }) {
   const scrollTo = (id: string) => {
-    setActive(id); // instant highlight
+    setActive(id);
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-
   return (
     <div className="sticky top-0 z-30 bg-[var(--bg)]/85 backdrop-blur border-b border-[var(--border)]">
       <div className="mx-auto max-w-6xl px-4 py-2">
-        {/* horizontal scroll on small screens; no wrapping */}
         <div
           role="tablist"
           aria-label="Sections"
           className="flex gap-2 overflow-x-auto whitespace-nowrap"
-          style={{ scrollbarWidth: "none" }} // hide FF scrollbar (non-blocking)
+          style={{ scrollbarWidth: "none" }}
         >
           {SECTIONS.map(({ id, label }) => {
             const isActive = active === id;
@@ -299,7 +309,7 @@ function TabBar({ active, setActive }: { active: string; setActive: (id: string)
                   isActive
                     ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_1px_0_rgba(0,0,0,0.08)]"
                     : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)] hover:-translate-y-[1px]",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60",
                 ].join(" ")}
               >
                 {label}
@@ -312,34 +322,31 @@ function TabBar({ active, setActive }: { active: string; setActive: (id: string)
   );
 }
 
-
 /* ======= Symbol Index (Searchable) ======= */
 function useSymbols() {
-  const [symbols, setSymbols] = useState<string[]>(() =>
-    [...new Set(DEFAULT_SYMBOLS.concat(PRESETS))].sort()
+  const [symbols, setSymbols] = useState<string[]>(
+    () => [...new Set(DEFAULT_SYMBOLS.concat(PRESETS))].sort()
   );
+
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}symbols.json`)
-      .then(r => (r.ok ? r.json() : Promise.reject()))
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((arr: string[]) => {
         if (Array.isArray(arr)) {
-          const merged = [...new Set([...symbols, ...arr.map(s => String(s).toUpperCase())])].sort();
+          const merged = [...new Set([...symbols, ...arr.map((s) => String(s).toUpperCase())])].sort();
           setSymbols(merged);
         }
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   return symbols;
 }
 
 function SymbolIndex({
-  value,
-  onPick,
-}: {
-  value: string;
-  onPick: (s: string) => void;
-}) {
+  value, onPick,
+}: { value: string; onPick: (s: string) => void; }) {
   const all = useSymbols();
   const [q, setQ] = useState("");
   const filtered = useMemo(() => {
@@ -411,17 +418,19 @@ export default function App() {
   const startISO = new Date(yday.getFullYear(), yday.getMonth(), yday.getDate() - 120).toISOString().slice(0,10);
 
   const [symbol, setSymbol] = useState("");
-  const [start, setStart]   = useState(startISO);
-  const [end, setEnd]       = useState(ydayISO);
+  const [start, setStart] = useState(startISO);
+  const [end, setEnd] = useState(ydayISO);
   const [threshold, setThreshold] = useState("");
-  const [holdDays, setHoldDays]   = useState("4");
+  const [holdDays, setHoldDays] = useState("4");
 
-  const [peek, setPeek]     = useState<PeekResponse | null>(null);
+  const [peek, setPeek] = useState<PeekResponse | null>(null);
   const [result, setResult] = useState<BacktestResponse | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [peekBusy, setPeekBusy] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
-  const [mode, setMode]       = useState<ChartMode>("equity");
+  const [error, setError] = useState<string | null>(null);
+
+  const [mode, setMode] = useState<ChartMode>("equity");
   const [sortKey, setSortKey] = useState<SortKey>("entry_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
@@ -448,7 +457,9 @@ export default function App() {
     setError(null);
   }, [symbol]);
 
-  useEffect(() => { if (end > ydayISO) setEnd(ydayISO); }, [end, ydayISO]);
+  useEffect(() => {
+    if (end > ydayISO) setEnd(ydayISO);
+  }, [end, ydayISO]);
 
   const parseThreshold = () => {
     const s = threshold.trim();
@@ -465,32 +476,53 @@ export default function App() {
 
   const canPeek = symbol.trim().length > 0;
 
-  const doPeek = async () => {
-    setError(null); setResult(null); setPeekBusy(true); setLoading(true);
+  /* --------- Peek: cancel stale calls; fire immediately on first click --------- */
+  const peekAbortRef = useRef<AbortController | null>(null);
+  const doPeek = useCallback(async () => {
+    if (!canPeek || peekBusy) return;
+    setError(null);
+    setResult(null);
+    setPeek(null);
+    setPeekBusy(true);
+
+    // cancel any in-flight peek first
+    try { peekAbortRef.current?.abort(); } catch {}
+    const ctrl = new AbortController();
+    peekAbortRef.current = ctrl;
+
     try {
-      const res = await api.post<PeekResponse>("/peek", { symbol, start, end });
+      const res = await api.post<PeekResponse>(
+        "/peek",
+        { symbol, start, end },
+        { signal: ctrl.signal as any }
+      );
       setPeek(res.data);
       if (isFinite(res.data?.suggested_threshold)) {
         setThreshold(res.data.suggested_threshold.toFixed(2));
       }
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e.message);
-      setPeek(null);
+      if (e?.name !== "CanceledError" && e?.message !== "canceled") {
+        setError(e?.response?.data?.detail ?? e?.message ?? "Peek failed");
+        setPeek(null);
+      }
     } finally {
       setPeekBusy(false);
-      setLoading(false);
     }
-  };
+  }, [symbol, start, end, canPeek, peekBusy]);
 
   const doBacktest = async () => {
-    setError(null); setLoading(true); setResult(null);
+    setError(null);
+    setLoading(true);
+    setResult(null);
     try {
       const thr = parseThreshold();
       const hd = parseHoldDays();
+
       if (strategy === "breakout") {
         if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
-        if (hd  === null) throw new Error("Hold Days must be a whole number >= 1.");
+        if (hd === null) throw new Error("Hold Days must be a whole number >= 1.");
       }
+
       const payload: any = {
         symbol, start, end,
         threshold: thr, hold_days: hd,
@@ -502,6 +534,7 @@ export default function App() {
             ? { fast: Number(fast), slow: Number(slow) }
             : { drop_pct: Number(revDropPct), hold_days: hd },
       };
+
       const res = await api.post<BacktestResponse>("/backtest", payload);
       setResult(res.data);
     } catch (e: any) {
@@ -542,7 +575,7 @@ export default function App() {
     new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit" }).format(new Date(iso));
 
   const thrInvalid = threshold.trim() !== "" && parseThreshold() === null;
-  const hdInvalid  = holdDays.trim() !== "" && parseHoldDays() === null;
+  const hdInvalid = holdDays.trim() !== "" && parseHoldDays() === null;
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -565,10 +598,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* Bigger, satisfying nav tabs */}
         <TabBar active={active} setActive={setActive} />
 
         <div className="mx-auto max-w-6xl px-4 pt-6 pb-10 space-y-8">
+
           {/* =================== Documentation =================== */}
           <div id="docs" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
@@ -615,10 +648,12 @@ export default function App() {
                     />
                     <datalist id="symbols">{PRESETS.map((s) => <option key={s} value={s} />)}</datalist>
                   </label>
+
                   <label className="text-sm">
                     <div className="mb-1 text-[var(--text)]/80">Start</div>
                     <input className="input" type="date" value={start} onChange={(e) => onStartChange(e.target.value)} max={ydayISO} />
                   </label>
+
                   <label className="text-sm">
                     <div className="mb-1 text-[var(--text)]/80">End</div>
                     <input className="input" type="date" value={end} onChange={(e) => onEndChange(e.target.value)} max={ydayISO} />
@@ -626,10 +661,16 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-wrap gap-3 mt-4 items-center">
-                  <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
+                  <button
+                    className="btn-accent px-3 py-2 rounded-lg text-sm font-medium"
+                    onClick={doPeek}
+                    disabled={peekBusy || !canPeek}
+                    aria-busy={peekBusy}
+                  >
                     {peekBusy ? (<><Spinner /><span className="ml-2">Peeking…</span></>) : "Peek"}
                   </button>
                 </div>
+
                 {error && <div className="mt-3"><ErrorBanner msg={error} onClose={()=>setError(null)} /></div>}
                 {peekBusy && !peek && <div className="mt-4"><SkeletonCard /></div>}
 
@@ -672,15 +713,12 @@ export default function App() {
           {/* Strategy & Parameters */}
           <div id="strategy" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy & Parameters</h3>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
                 <label className="text-sm sm:col-span-2">
                   <div className="mb-1 text-[var(--text)]/80">Strategy</div>
-                  <select
-                    className="input"
-                    value={strategy}
-                    onChange={(e) => setStrategy(e.target.value as StrategyKey)}
-                  >
+                  <select className="input" value={strategy} onChange={(e) => setStrategy(e.target.value as StrategyKey)}>
                     <option value="breakout">Breakout (threshold)</option>
                     <option value="sma_cross">SMA Crossover</option>
                     <option value="mean_rev">Mean Reversion</option>
@@ -742,7 +780,11 @@ export default function App() {
                 )}
 
                 <div className="sm:col-span-2 flex items-center gap-3">
-                  <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doBacktest} disabled={loading || !canPeek}>
+                  <button
+                    className="btn-accent px-3 py-2 rounded-lg text-sm font-medium"
+                    onClick={doBacktest}
+                    disabled={loading || !canPeek}
+                  >
                     {loading ? (<><Spinner /><span className="ml-2">Running…</span></>) : "Run Backtest"}
                   </button>
                 </div>
@@ -755,7 +797,7 @@ export default function App() {
                   <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
                     <li><strong>Intent:</strong> catch momentum when price <em>closes above</em> a user-set <strong>Threshold</strong>.</li>
                     <li><strong>Entry:</strong> first daily close ≥ Threshold opens a single long position next bar.</li>
-                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong> bars; P&L realized on exits.</li>
+                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong> bars; P&amp;L realized on exits.</li>
                     <li><strong>Tip:</strong> start near Peek’s <em>Suggested Threshold</em>, then sweep ±2–5%.</li>
                   </ul>
                 )}
@@ -787,7 +829,8 @@ export default function App() {
                   {loading && (
                     <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center rounded-xl z-10">
                       <div className="px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--panel)] text-sm">
-                        <Spinner /> <span className="ml-2">Crunching numbers…</span>
+                        <Spinner />
+                        <span className="ml-2">Crunching numbers…</span>
                       </div>
                     </div>
                   )}
@@ -834,19 +877,15 @@ export default function App() {
                             </linearGradient>
                           </defs>
                           <CartesianGrid stroke={PALETTE.grid} vertical={false} />
-                          <XAxis dataKey="date" tickMargin={12} stroke={PALETTE.axis} tickFormatter={(d) => new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit" }).format(new Date(d))}>
+                          <XAxis dataKey="date" tickMargin={12} stroke={PALETTE.axis}
+                                 tickFormatter={(d) => new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit" }).format(new Date(d))}>
                             <Label value="Date" position="bottom" offset={24} fill={PALETTE.axis} />
                           </XAxis>
                           <YAxis stroke={PALETTE.axis} tickFormatter={fmtMoney} tickMargin={10}>
                             <Label value="Equity ($)" angle={-90} position="insideLeft" offset={14} dx={-60} dy={30} fill={PALETTE.axis} />
                           </YAxis>
                           <Tooltip
-                            contentStyle={{
-                              background: "var(--panel)",
-                              border: "1px solid var(--border)",
-                              borderRadius: 12,
-                              color: "var(--text)",
-                            }}
+                            contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, color: "var(--text)" }}
                             formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
                           />
                           <Area type="monotone" dataKey="equity" stroke={PALETTE.priceLine} fill="url(#eqFill)" strokeWidth={2} />
@@ -861,12 +900,7 @@ export default function App() {
                             <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-28} dy={10} fill={PALETTE.axis} />
                           </YAxis>
                           <Tooltip
-                            contentStyle={{
-                              background: "var(--panel)",
-                              border: "1px solid var(--border)",
-                              borderRadius: 12,
-                              color: "var(--text)",
-                            }}
+                            contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, color: "var(--text)" }}
                             formatter={(v: any) => [fmtMoney2(v as number), "Close"]}
                           />
                           <Line type="monotone" dataKey="close" stroke={PALETTE.priceLine} dot={false} strokeWidth={2} />
@@ -888,20 +922,18 @@ export default function App() {
                     <Stat label="Average Trade Return" value={fmtPct2(avgTradeReturn)} numeric={avgTradeReturn} tint />
                     <Stat label="Max Drawdown" value={fmtPct2(result.metrics.max_drawdown)} numeric={-result.metrics.max_drawdown} tint />
                   </div>
-
                   <div className="grid sm:grid-cols-4 gap-4 mt-4">
                     <Stat label="Final Equity" value={fmtMoney2(result.metrics.final_equity)} />
                     <Stat label="Win Rate" value={fmtPct1(result.metrics.win_rate)} />
                     <Stat label="Trades" value={String((result.trades ?? []).length)} />
                     <Stat label="Initial Equity" value={fmtMoney2(result.metrics.initial_equity)} />
                   </div>
-
                   <div className="mt-3 text-xs text-[var(--muted)] italic">
                     Equity starts at {fmtMoney2(result.metrics.initial_equity)} and steps up/down only on exit days (one position at a time).
                   </div>
                 </div>
 
-                {/* Trades + Optimizer (NO id; stays under Results) */}
+                {/* Trades + Optimizer */}
                 <div className="flex flex-col h-full">
                   <div className="card p-6 mb-6">
                     <div className="flex items-center justify-between mb-4">
@@ -931,29 +963,33 @@ export default function App() {
                     </div>
 
                     {tradeView === "cards" ? (
-                      <div className="overflow-x-auto">
-                        <div className="grid auto-cols-[210px] grid-flow-col gap-4">
-                          {tradesWithBars.map((t, i) => {
-                            const positive = t.pnl >= 0;
-                            return (
-                              <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-                                <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
-                                <div className="text-sm text-[var(--text)]/80 space-y-1">
-                                  <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
-                                  <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
-                                  <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
-                                  <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
-                                  <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
-                                  <div className="flex justify-end">
-                                    <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")}>
-                                      {positive ? "Win" : "Loss"}
-                                    </span>
-                                  </div>
+                      // Responsive grid; keeps card width wide enough to avoid wrapping
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {tradesWithBars.map((t, i) => {
+                          const positive = t.pnl >= 0;
+                          return (
+                            <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 min-w-[240px]">
+                              <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
+                              <div className="text-sm text-[var(--text)]/80 space-y-1">
+                                <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
+                                <Row k="Exit Px"  v={t.exit_price.toFixed(2)} />
+                                <Row k="PnL"      v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
+                                <Row k="Return"   v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
+                                <Row k="Bars"     v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
+                                <div className="flex justify-end pt-1">
+                                  <span
+                                    className={
+                                      "px-2 py-0.5 rounded-full text-xs " +
+                                      (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")
+                                    }
+                                  >
+                                    {positive ? "Win" : "Loss"}
+                                  </span>
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
@@ -981,6 +1017,77 @@ export default function App() {
                         </table>
                       </div>
                     )}
+
+{tradeView === "cards" ? (
+  // HORIZONTAL SCROLLING CARDS
+  <div className="overflow-x-auto pb-1">
+    <div className="grid grid-flow-col auto-cols-[minmax(240px,1fr)] gap-4">
+      {tradesWithBars.map((t, i) => {
+        const positive = t.pnl >= 0;
+        return (
+          <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+            <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
+            <div className="text-sm text-[var(--text)]/80 space-y-1">
+              <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
+              <Row k="Exit Px"  v={t.exit_price.toFixed(2)} />
+              <Row k="PnL"      v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
+              <Row k="Return"   v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
+              <Row k="Bars"     v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
+              <div className="flex justify-end pt-1">
+                <span
+                  className={
+                    "px-2 py-0.5 rounded-full text-xs " +
+                    (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")
+                  }
+                >
+                  {positive ? "Win" : "Loss"}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+) : (
+  // TABLE VIEW (unchanged)
+  <div className="overflow-x-auto">
+    <table className="table text-sm w-full">
+      <thead>
+        <tr className="text-[var(--text)]">
+          <Th onClick={() => toggleSort("entry_date")}>
+            Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}
+          </Th>
+          <Th onClick={() => toggleSort("exit_date")}>
+            Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}
+          </Th>
+          <Th>Entry</Th><Th>Exit</Th>
+          <Th onClick={() => toggleSort("pnl")}>
+            PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}
+          </Th>
+          <Th onClick={() => toggleSort("return_pct")}>
+            Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}
+          </Th>
+          <Th onClick={() => toggleSort("daysBars")}>
+            Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}
+          </Th>
+        </tr>
+      </thead>
+      <tbody>
+        {tradesWithBars.map((t, i) => (
+          <tr key={i} className={t.pnl >= 0 ? "text-up" : "text-down"}>
+            <td>{t.entry_date}</td><td>{t.exit_date}</td>
+            <td>{t.entry_price.toFixed(2)}</td><td>{t.exit_price.toFixed(2)}</td>
+            <td>{t.pnl.toFixed(2)}</td><td>{(t.return_pct * 100).toFixed(2)}%</td>
+            <td>{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+)}
+
+
                   </div>
 
                   <OptimizerPanel
@@ -1009,14 +1116,11 @@ export default function App() {
 /* ========== Small UI bits ========== */
 function Stat({
   label, value, sub, numeric, tint = false
-}: {
-  label: string; value: string; sub?: string; numeric?: number | null; tint?: boolean;
-}) {
+}: { label: string; value: string; sub?: string; numeric?: number | null; tint?: boolean; }) {
   const tone =
     tint && Number.isFinite(numeric)
-      ? (numeric! > 0 ? "text-up" : numeric! < 0 ? "text-down" : "text-[var(--text)]")
+      ? numeric! > 0 ? "text-up" : numeric! < 0 ? "text-down" : "text-[var(--text)]"
       : "text-[var(--text)]";
-
   return (
     <div className="p-5 rounded-xl bg-[var(--panel)] border border-[var(--border)]">
       <div className="text-sm text-[var(--muted)]">{label}</div>
@@ -1028,34 +1132,37 @@ function Stat({
 
 function Row({ k, v, tone }: { k: string; v: any; tone?: "win" | "loss" }) {
   const c = tone === "win" ? "text-up" : tone === "loss" ? "text-down" : "text-[var(--text)]/80";
-  return <div className={`flex justify-between ${c}`}><span>{k}</span><span className="tabular-nums">{v}</span></div>;
+  return (
+    <div className={`flex items-center justify-between gap-2 ${c}`}>
+      <span className="truncate">{k}</span>
+      <span className="tabular-nums whitespace-nowrap">{v}</span>
+    </div>
+  );
 }
+
 function Th({ children, onClick }: { children: any; onClick?: () => void }) {
-  return <th className="cursor-pointer text-[var(--text)]/90" onClick={onClick}>{children}</th>;
+  return (
+    <th className="cursor-pointer text-[var(--text)]/90" onClick={onClick}>
+      {children}
+    </th>
+  );
 }
 
 /* ========== Optimizer Panel ========== */
 function OptimizerPanel({
-  strategy,
-  result,
-  trades,
-}: {
-  strategy: StrategyKey;
-  result: BacktestResponse;
-  trades: (Trade & { daysBars?: number })[];
-}) {
+  strategy, result, trades,
+}: { strategy: StrategyKey; result: BacktestResponse; trades: (Trade & { daysBars?: number })[]; }) {
   const wins = trades.filter((t) => t.pnl > 0);
   const losses = trades.filter((t) => t.pnl <= 0);
-  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
 
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
   const sumWins = sum(wins.map((t) => t.pnl));
   const sumLossAbs = Math.abs(sum(losses.map((t) => t.pnl)));
-  const profitFactor =
-    sumLossAbs === 0 ? (sumWins > 0 ? Infinity : 0) : sumWins / sumLossAbs;
+  const profitFactor = sumLossAbs === 0 ? (sumWins > 0 ? Infinity : 0) : sumWins / sumLossAbs;
 
   const avgWin = wins.length ? sumWins / wins.length : 0;
-  const avgLossAbs =
-    losses.length ? Math.abs(sum(losses.map((t) => t.pnl)) / losses.length) : 0;
+  const avgLossAbs = losses.length ? Math.abs(sum(losses.map((t) => t.pnl)) / losses.length) : 0;
+
   const hitRate = trades.length ? wins.length / trades.length : 0;
   const expectancy = avgWin * hitRate - avgLossAbs * (1 - hitRate);
 
@@ -1089,37 +1196,35 @@ function OptimizerPanel({
       <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">
         Optimizer Insights
       </h3>
-
       <div className="flex flex-col gap-2 mb-4">
         <MetricRow label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} numeric={profitFactor - 1} tint />
         <MetricRow label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} numeric={expectancy} tint />
         <MetricRow label="Hit Rate" value={fmtPct2(hitRate)} numeric={hitRate - 0.5} tint />
         <MetricRow label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
-
       <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
         <div className="text-[12px] font-semibold text-[var(--text)]/80 mb-1.5">Suggestions</div>
         <ul className="list-disc ml-5 text-[12px] leading-5 text-[var(--text)]/80 space-y-1">
-          {sugg.slice(0, 4).map((s, i) => (
-            <li key={i}>{s}</li>
-          ))}
+          {sugg.slice(0, 4).map((s, i) => (<li key={i}>{s}</li>))}
         </ul>
       </div>
     </div>
   );
 }
-function MetricRow({ label, value, numeric, tint = false }: { label: string; value: string; numeric?: number; tint?: boolean }) {
+
+function MetricRow({
+  label, value, numeric, tint = false
+}: { label: string; value: string; numeric?: number; tint?: boolean }) {
   const s = String(value);
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
   const valueSize =
-    significantLen > 12 ? "text-base sm:text-lg"
-      : significantLen > 9 ? "text-lg sm:text-xl"
-      : "text-xl sm:text-2xl";
+    significantLen > 12 ? "text-base sm:text-lg" :
+    significantLen > 9  ? "text-lg sm:text-xl" :
+                           "text-xl sm:text-2xl";
   const tone =
     tint && Number.isFinite(numeric)
-      ? (numeric! > 0 ? "text-up" : numeric! < 0 ? "text-down" : "text-[var(--text)]")
+      ? numeric! > 0 ? "text-up" : numeric! < 0 ? "text-down" : "text-[var(--text)]"
       : "text-[var(--text)]";
-
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 py-2 h-14 flex items-center justify-between">
       <div className="text-[11px] sm:text-xs text-[var(--muted)] mr-3">{label}</div>
