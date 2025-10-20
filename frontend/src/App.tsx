@@ -269,34 +269,49 @@ function useActiveSection() {
 
 function TabBar({ active, setActive }: { active: string; setActive: (id: string) => void }) {
   const scrollTo = (id: string) => {
-    setActive(id); // instant highlight on click
+    setActive(id); // instant highlight
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
   return (
-    <div className="sticky top-0 z-30 bg-[var(--bg)]/85 backdrop-blur border-b border-[var(--border)] shadow-[inset_0_-1px_0_0_var(--border)]">
-      <div className="mx-auto max-w-7xl px-4 py-3 flex flex-wrap gap-2">
-        {SECTIONS.map(({ id, label }) => {
-          const isActive = active === id;
-          return (
-            <button
-              key={id}
-              onClick={() => scrollTo(id)}
-              className={
-                "inline-flex items-center justify-center h-11 px-4 rounded-xl border text-base font-semibold tracking-wide transition " +
-                (isActive
-                  ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_0_0_2px_rgba(255,176,0,0.18)_inset,0_8px_24px_rgba(0,0,0,0.35)]"
-                  : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)] hover:-translate-y-px")
-              }
-            >
-              {label}
-            </button>
-          );
-        })}
+    <div className="sticky top-0 z-30 bg-[var(--bg)]/85 backdrop-blur border-b border-[var(--border)]">
+      <div className="mx-auto max-w-6xl px-4 py-2">
+        {/* horizontal scroll on small screens; no wrapping */}
+        <div
+          role="tablist"
+          aria-label="Sections"
+          className="flex gap-2 overflow-x-auto whitespace-nowrap"
+          style={{ scrollbarWidth: "none" }} // hide FF scrollbar (non-blocking)
+        >
+          {SECTIONS.map(({ id, label }) => {
+            const isActive = active === id;
+            return (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={id}
+                onClick={() => scrollTo(id)}
+                className={[
+                  "inline-flex items-center justify-center rounded-lg border transition",
+                  "h-10 md:h-11 px-3 md:px-4 text-sm md:text-base font-medium tracking-wide",
+                  isActive
+                    ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_1px_0_rgba(0,0,0,0.08)]"
+                    : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)] hover:-translate-y-[1px]",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
+                ].join(" ")}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
+
 
 /* ======= Symbol Index (Searchable) ======= */
 function useSymbols() {
