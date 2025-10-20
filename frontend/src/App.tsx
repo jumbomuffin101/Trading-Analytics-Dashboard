@@ -930,51 +930,55 @@ export default function App() {
                       </div>
                     </div>
 
-                    {tradeView === "cards" ? (
-                      <div className="overflow-x-auto">
-                        <div className="grid auto-cols-[210px] grid-flow-col gap-4">
-                          {tradesWithBars.map((t, i) => {
-                            const positive = t.pnl >= 0;
-                            return (
-                              <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-                                <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
-                                <div className="text-sm text-[var(--text)]/80 space-y-1">
-                                  <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
-                                  <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
-                                  <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
-                                  <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
-                                  <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
-                                  <div className="flex justify-end">
-                                    <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")}>
-                                      {positive ? "Win" : "Loss"}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="table text-sm w-full">
-                          <thead>
-                            <tr className="text-[var(--text)]">
-                              <Th onClick={() => toggleSort("entry_date")}>Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                              <Th onClick={() => toggleSort("exit_date")}>Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                              <Th>Entry</Th><Th>Exit</Th>
-                              <Th onClick={() => toggleSort("pnl")}>PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                              <Th onClick={() => toggleSort("return_pct")}>Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                              <Th onClick={() => toggleSort("daysBars")}>Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                            </tr>
-                          </thead>
-                          <tbody>
+{tradeView === "cards" ? (
+  <div className="max-h-[560px] overflow-auto">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {tradesWithBars.map((t, i) => {
+        const positive = t.pnl >= 0;
+        return (
+          <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+            <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
+            <div className="text-sm text-[var(--text)]/80 space-y-1">
+              <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
+              <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
+              <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
+              <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
+              <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
+              <div className="flex justify-end">
+                <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")}>
+                  {positive ? "Win" : "Loss"}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+) : (
+
+<div className="max-h-[560px] overflow-auto rounded-xl border border-[var(--border)]">
+  <table className="w-full text-sm">
+    <thead className="sticky top-0 bg-[var(--panel)] z-10">
+      <tr className="text-[var(--text)]">
+        <Th onClick={() => toggleSort("entry_date")}>Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+        <Th onClick={() => toggleSort("exit_date")}>Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+        <Th>Entry</Th><Th>Exit</Th>
+        <Th onClick={() => toggleSort("pnl")}>PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+        <Th onClick={() => toggleSort("return_pct")}>Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+        <Th onClick={() => toggleSort("daysBars")}>Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+      </tr>
+    </thead>
+    <tbody>
                             {tradesWithBars.map((t, i) => (
                               <tr key={i} className={t.pnl >= 0 ? "text-up" : "text-down"}>
-                                <td>{t.entry_date}</td><td>{t.exit_date}</td>
-                                <td>{t.entry_price.toFixed(2)}</td><td>{t.exit_price.toFixed(2)}</td>
-                                <td>{t.pnl.toFixed(2)}</td><td>{(t.return_pct * 100).toFixed(2)}%</td>
-                                <td>{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</td>
+                                <td className="px-3 py-2">{t.entry_date}</td>
+                                <td className="px-3 py-2">{t.exit_date}</td>
+                                <td className="px-3 py-2">{t.entry_price.toFixed(2)}</td>
+                                <td className="px-3 py-2">{t.exit_price.toFixed(2)}</td>
+                                <td className="px-3 py-2">{t.pnl.toFixed(2)}</td>
+                                <td className="px-3 py-2">{(t.return_pct * 100).toFixed(2)}%</td>
+                                <td className="px-3 py-2">{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</td>
                               </tr>
                             ))}
                           </tbody>
