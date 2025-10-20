@@ -253,13 +253,10 @@ const SECTIONS = [
 function useActiveSection() {
   const [active, setActive] = useState<string>("docs");
   const observer = useRef<IntersectionObserver | null>(null);
-
   useEffect(() => {
     const opts = { root: null, rootMargin: "0px 0px -70% 0px", threshold: [0, 0.2, 0.6] };
     const cb: IntersectionObserverCallback = (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) setActive(entry.target.id);
-      });
+      entries.forEach((entry) => entry.isIntersecting && setActive(entry.target.id));
     };
     observer.current = new IntersectionObserver(cb, opts);
     SECTIONS.forEach(({ id }) => {
@@ -277,8 +274,8 @@ function TabBar({ active }: { active: string }) {
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   return (
-    <div className="sticky top-0 z-20 bg-[var(--bg)]/80 backdrop-blur border-b border-[var(--border)]">
-      <div className="mx-auto max-w-6xl px-4 py-2 flex flex-wrap gap-2">
+    <div className="sticky top-0 z-30 bg-[var(--bg)]/85 backdrop-blur border-b border-[var(--border)] shadow-[inset_0_-1px_0_0_var(--border)]">
+      <div className="mx-auto max-w-7xl px-4 py-3 flex flex-wrap gap-2 scrollbar-thin">
         {SECTIONS.map(({ id, label }) => {
           const isActive = active === id;
           return (
@@ -286,10 +283,10 @@ function TabBar({ active }: { active: string }) {
               key={id}
               onClick={() => scrollTo(id)}
               className={
-                "px-3 py-1.5 rounded-full text-sm transition border " +
+                "inline-flex items-center justify-center h-11 px-4 rounded-xl border text-base font-semibold tracking-wide transition " +
                 (isActive
-                  ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_0_0_2px_rgba(245,196,0,0.2)]"
-                  : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)]")
+                  ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)] shadow-[0_0_0_2px_rgba(255,176,0,0.18)_inset,0_8px_24px_rgba(0,0,0,0.35)]"
+                  : "bg-[var(--panel)] text-[var(--text)] border-[var(--border)] hover:border-[var(--accent)] hover:-translate-y-px")
               }
             >
               {label}
@@ -549,7 +546,7 @@ export default function App() {
     <div className="theme-terminal">
       <div className="page-root min-h-screen bg-[var(--bg)] text-[var(--text)]">
         <div className="relative overflow-hidden">
-          <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
+          <div className="relative mx-auto max-w-7xl px-4 pt-10 pb-6">
             <div className="flex items-center gap-3">
               <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">
                 $
@@ -562,7 +559,7 @@ export default function App() {
         {/* Pretty, pill-style nav tabs */}
         <TabBar active={activeSection} />
 
-        <div className="mx-auto max-w-6xl px-4 pt-6 pb-10 space-y-8">
+        <div className="mx-auto max-w-7xl px-4 pt-6 pb-10 space-y-8">
           {/* =================== Documentation =================== */}
           <div id="docs" className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>

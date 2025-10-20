@@ -2,199 +2,132 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Bloomberg-like palette via CSS variables */
+/* ========= Bloomberg-like terminal theme ========= */
 .theme-terminal {
-  --bg: #0b0c10;          /* page background (near-black) */
-  --panel: #111218;       /* card background */
-  --border: #1f222b;      /* card/border lines */
-  --text: #e5e7eb;        /* primary text */
-  --muted: #9aa3b2;       /* secondary text */
-  --accent: #ffb000;      /* Bloomberg orange */
-  --up: #00ff6a;          /* bright green for gains */
-  --down: #ff3b3b;        /* bright red for losses */
-  --grid: #2a2f3a;        /* chart gridlines */
-  --cyan: #00c2ff;        /* optional highlight */
-  --magenta: #ff4dff;     /* optional highlight */
+  --bg: #0b0c10;
+  --panel: #111218;
+  --border: #1f222b;
+  --text: #e5e7eb;
+  --muted: #9aa3b2;
+  --accent: #ffb000; /* orange */
+  --up: #00ff6a;
+  --down: #ff3b3b;
+  --grid: #2a2f3a;
+  --cyan: #00c2ff;
+  --magenta: #ff4dff;
 }
 
-
-
-/* General page base when terminal theme is active */
-.theme-terminal body, .theme-terminal .page-root {
+/* Base (scoped so we don’t fight Tailwind defaults) */
+:root { color-scheme: dark; }
+html, body, #root { height: 100%; }
+.theme-terminal .page-root {
   background-color: var(--bg);
   color: var(--text);
 }
 
-/* Card helper (uses your existing .card class name) */
-.card {
-  background-color: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem; /* ~rounded-xl */
-}
-
-/* Subtle divider / sections */
-.hr-muted {
-  height: 1px;
-  background: var(--border);
-  border: 0;
-}
-
-/* Button styles that pop in terminal theme */
-.btn-accent {
-  background: var(--accent);
-  color: #0b0c10;
-  border: 1px solid transparent;
-}
-.btn-accent:hover { filter: brightness(1.05); }
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-.btn-ghost:hover { border-color: var(--accent); }
-
-/* Small utility colors (optional) */
-.text-muted { color: var(--muted); }
-.text-accent { color: var(--accent); }
-.text-up { color: var(--up); }
-.text-down { color: var(--down); }
-.border-muted { border-color: var(--border); }
-.bg-panel { background: var(--panel); }
-
-
-/* App base */
-:root { color-scheme: dark; }
-html, body, #root { height: 100%; }
-body { @apply bg-slate-950 text-slate-100; }
-
-/* Cards, buttons, inputs */
-.card { @apply rounded-2xl bg-slate-900/60 backdrop-blur border border-slate-800; }
-
-.btn { @apply px-4 py-2 rounded-lg font-medium transition-colors; }
-.btn-primary { @apply btn bg-emerald-600 hover:bg-emerald-500 text-white; }
-.btn-ghost  { @apply btn bg-slate-800/60 hover:bg-slate-700/60 text-slate-200; }
-
-.input { @apply w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500; }
-
-/* Table */
-.table th, .table td { @apply p-2 border-b border-slate-800; }
-.table th { @apply text-left text-slate-300; }
-.table th, .table td { white-space: nowrap; }
-.table thead th { position: sticky; top: 0; background: rgba(2,6,23,.8); backdrop-filter: blur(2px); }
-
-/* Chips for quick symbols */
-.chip { @apply px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-200 text-sm cursor-pointer transition-colors; }
-.chip:hover { @apply bg-slate-700; }
-.chip.active { @apply bg-emerald-600 text-white border-emerald-500; }
-
-/* Slightly larger defaults */
-body { font-size: 17px; }
-
-/* Prevent KPI/trade value wrapping */
-.kpi .value { white-space: nowrap; }
-
-/* Symbol chips */
-.chip {
-  padding: 0.35rem 0.75rem;
-  border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text);
-  font-weight: 600;
-  transition: border-color .15s ease, background .15s ease, color .15s ease;
-}
-.chip:hover { border-color: var(--accent); }
-.chip.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0b0c10; /* terminal bg for contrast */
-}
-
-/* Optional: inputs to feel terminal-y */
-.input {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-.input::placeholder { color: var(--muted); }
-.input:focus { outline: none; border-color: var(--accent); }
-
-/* === TERMINAL THEME OVERRIDES (Bloomberg style) === */
-/* Scope all overrides under .theme-terminal so they beat @apply defaults */
-.theme-terminal .page-root {
-  background-color: var(--bg) !important;
-  color: var(--text) !important;
-}
-
 /* Cards */
 .theme-terminal .card {
-  background-color: var(--panel) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 0.75rem !important;
-}
-
-/* Headings in sections (so labels like "Drawdown", "Peek & Symbols" pop) */
-.theme-terminal .card h3,
-.theme-terminal h3.section-title {
-  color: var(--accent) !important;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.02) inset, 0 12px 30px rgba(0,0,0,0.35);
 }
 
 /* Buttons */
-.theme-terminal .btn-accent,
-.theme-terminal .btn-primary {
-  background: var(--accent) !important;
-  color: #0b0c10 !important;
-  border: 1px solid var(--accent) !important;
+.theme-terminal .btn-accent {
+  background: var(--accent);
+  color: #0b0c10;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  transition: transform .05s, box-shadow .15s;
 }
+.theme-terminal .btn-accent:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(255,176,0,0.20); }
+.theme-terminal .btn-accent:active { transform: translateY(0); box-shadow: none; }
+
 .theme-terminal .btn-ghost {
-  background: transparent !important;
-  color: var(--text) !important;
-  border: 1px solid var(--border) !important;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.5rem 0.75rem;
 }
-.theme-terminal .btn-accent:hover,
-.theme-terminal .btn-primary:hover { filter: brightness(1.05); }
 .theme-terminal .btn-ghost:hover { border-color: var(--accent); }
 
 /* Inputs */
 .theme-terminal .input {
-  background: var(--panel) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--text) !important;
+  width: 100%;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  transition: border-color .15s, box-shadow .15s;
 }
-.theme-terminal .input::placeholder { color: var(--muted) !important; }
-.theme-terminal .input:focus { outline: none !important; border-color: var(--accent) !important; }
+.theme-terminal .input::placeholder { color: var(--muted); }
+.theme-terminal .input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255,176,0,0.20);
+}
 
 /* Quick symbol chips */
 .theme-terminal .chip {
-  padding: 0.35rem 0.75rem !important;
-  border-radius: 9999px !important;
-  background: transparent !important;
-  border: 1px solid var(--border) !important;
-  color: var(--text) !important;
-  font-weight: 600 !important;
-  transition: border-color .15s ease, background .15s ease, color .15s ease !important;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+  transition: border-color .15s, background .15s, color .15s, transform .05s;
 }
-.theme-terminal .chip:hover { border-color: var(--accent) !important; }
+.theme-terminal .chip:hover { border-color: var(--accent); transform: translateY(-1px); }
 .theme-terminal .chip.active {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  color: #0b0c10 !important;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b0c10;
+  box-shadow: 0 0 0 2px rgba(255,176,0,0.18) inset;
 }
 
-/* Tables / subtle bits */
-.theme-terminal .table th, 
+/* Tables */
+.theme-terminal .table th,
 .theme-terminal .table td {
-  border-color: var(--border) !important;
-  color: var(--text) !important;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
 }
 .theme-terminal .table thead th {
-  background: rgba(17, 18, 24, 0.8) !important; /* var(--panel) with alpha */
+  background: rgba(17,18,24,0.85);
+  position: sticky; top: 0;
   backdrop-filter: blur(2px);
+  font-weight: 600;
 }
 
-/* Recharts default text color when not explicitly set */
+/* Headings pop */
+.theme-terminal h3,
+.theme-terminal .card h3 { color: var(--accent); }
+
+/* Recharts / axis + tooltip */
 .theme-terminal .recharts-cartesian-axis-tick-value,
+.theme-terminal .recharts-default-tooltip { color: var(--text) !important; }
 .theme-terminal .recharts-default-tooltip {
-  color: var(--text) !important;
+  backdrop-filter: blur(6px);
+  border-radius: 12px !important;
+  border-color: var(--border) !important;
 }
+
+/* Small helpers */
+.theme-terminal .hr-muted { height: 1px; background: var(--border); border: 0; }
+.theme-terminal .text-muted { color: var(--muted); }
+.theme-terminal .text-up { color: var(--up); }
+.theme-terminal .text-down { color: var(--down); }
+
+/* Slightly larger default body text for workstation feel */
+.theme-terminal body { font-size: 17px; }
+
+/* Make the top nav scrollbar tidy if overflowed */
+.scrollbar-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #2a2f3b; border-radius: 8px; }
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: #2a2f3b transparent; }
