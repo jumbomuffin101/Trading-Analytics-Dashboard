@@ -17,6 +17,25 @@ class Trade:
 # ---------------------------
 # Entry builders (boolean Series)
 # ---------------------------
+
+# === EVERY-BAR entry modes (many signals) ===
+
+def breakout_entries_everybar(df: pd.DataFrame, threshold: float) -> pd.Series:
+    """
+    Open on EVERY bar where close >= threshold.
+    """
+    c = pd.to_numeric(df["close"], errors="coerce").astype(float)
+    return (c >= float(threshold)).fillna(False)
+
+def sma_entries_everybar(df: pd.DataFrame, fast: int, slow: int) -> pd.Series:
+    """
+    Open on EVERY bar where SMA_fast >= SMA_slow.
+    """
+    c = pd.to_numeric(df["close"], errors="coerce").astype(float)
+    f = c.rolling(int(fast), min_periods=int(fast)).mean()
+    s = c.rolling(int(slow), min_periods=int(slow)).mean()
+    return (f >= s).fillna(False)
+
 def meanrev_drop_entries(df: pd.DataFrame, drop_pct: float) -> pd.Series:
     """
     Enter long on ANY bar where today's close <= prior close * (1 - drop_pct%).

@@ -6,10 +6,12 @@ from typing import Dict, Any, List
 from backtest import (
     run_backtest,
     run_backtest_stacking,
-    breakout_entries,
-    sma_entries,
-    meanrev_entries,        # z-score variant (keep if you have it)
-    meanrev_drop_entries,   # <-- new: drop-% variant you just added
+    breakout_entries,              # cross-only
+    breakout_entries_everybar,     # <<< every bar >= threshold
+    sma_entries,                   # cross-only
+    sma_entries_everybar,          # <<< every bar fast >= slow
+    meanrev_entries,               # z-score variant (optional)
+    meanrev_drop_entries,          # drop-% variant (UI-friendly)
 )
 
 @app.post("/backtest")
@@ -21,7 +23,7 @@ async def backtest_post(req: Request):
     start  = data.get("start")
     end    = data.get("end")
 
-    # Strategy (accept aliases used by the frontend)
+    # Accept frontend aliases
     raw_strategy = (data.get("strategy") or "breakout").lower().strip()
     if raw_strategy in ("sma_cross", "sma-x", "sma"):
         strategy = "sma"
@@ -30,10 +32,13 @@ async def backtest_post(req: Request):
     else:
         strategy = "breakout"
 
-    # Core params (allow in both places)
+    # Entry mode: "every_bar" (default) or "cross"
+    entry_mode = (data.get("entry_mode") or data.get("mode") or "every_bar").lower().strip()
+
+    # Core params (allow both top-level and params)
     hold_days = data.get("hold_days", params.get("hold_days"))
     threshold = data.get("threshold", params.get("threshold"))
-    stacking  = bool(data.get("stacking", True))
+    stacking  = bool(data.get("stacking", True))        # keep stacking ON
     position_size = float(data.get("position_size", 1.0))
 
     if not (symbol and start and end):
@@ -45,37 +50,37 @@ async def backtest_post(req: Request):
     if hold_days < 1:
         raise HTTPException(status_code=400, detail="hold_days must be an integer >= 1")
 
-    # Load range
+    # Load data
     df, _src = _get_prices_cached(symbol, start, end)
     if "close" not in df.columns or df["close"].empty:
         raise HTTPException(status_code=404, detail="No closes in range.")
     df = df.sort_index()
 
-    # Initial equity rule (unchanged)
+    # Dynamic initial equity
     median_close = float(pd.to_numeric(df["close"], errors="coerce").astype(float).median())
     initial_equity = 5_000.0 if median_close <= 5_000.0 else 50_000.0
 
     # ----------------- Strategy routing -----------------
-    params_payload: Dict[str, Any] = {"hold_days": int(hold_days)}
+    params_payload: Dict[str, Any] = {"hold_days": int(hold_days), "entry_mode": entry_mode}
 
     if strategy == "breakout":
-        # If no threshold given, pick a lively one (~75th pct) so you get multiple crosses
+        # If missing, choose lively threshold (~75th pct of closes)
         if threshold is None or not isinstance(threshold, (int, float)):
             closes = pd.to_numeric(df["close"], errors="coerce").astype(float).to_numpy()
             threshold = float(np.nanpercentile(closes, 75))
         params_payload["threshold"] = float(threshold)
 
-        if stacking:
+        # entries: every-bar by default
+        if entry_mode == "cross":
             entries = breakout_entries(df, float(threshold))
-            result = run_backtest_stacking(df, entries, hold_days, initial_equity, position_size)
         else:
-            result = run_backtest(df, float(threshold), hold_days, initial_equity)
+            entries = breakout_entries_everybar(df, float(threshold))
+
+        result = run_backtest_stacking(df, entries, hold_days, initial_equity, position_size)
 
     elif strategy == "sma":
-        # Accept from top-level or params
         fast = data.get("fast", params.get("fast"))
         slow = data.get("slow", params.get("slow"))
-        # Defaults that produce DOZENS of signals over 3–5y
         try:
             fast = int(fast) if fast is not None else 10
             slow = int(slow) if slow is not None else 20
@@ -83,36 +88,36 @@ async def backtest_post(req: Request):
             fast, slow = 10, 20
         if fast >= slow:
             fast, slow = max(5, min(fast, slow) - 5), max(fast, slow)
-
         params_payload.update({"fast": fast, "slow": slow})
 
-        entries = sma_entries(df, fast, slow)
+        # entries: every-bar by default
+        if entry_mode == "cross":
+            entries = sma_entries(df, fast, slow)
+        else:
+            entries = sma_entries_everybar(df, fast, slow)
+
         result = run_backtest_stacking(df, entries, hold_days, initial_equity, position_size)
 
     elif strategy == "mean_reversion":
-        # Two modes supported:
-        #   (A) Your UI: params.drop_pct (percent vs prior close)
-        #   (B) Z-score: lookback + k_sigma (optional, if you add later)
+        # Support drop-% (preferred by your UI) and z-score fallback
         drop_pct = data.get("drop_pct", params.get("drop_pct"))
         lookback = data.get("lookback", params.get("lookback"))
         k_sigma  = data.get("k_sigma", params.get("k_sigma"))
 
         if isinstance(drop_pct, (int, float)):
-            # Drop-% mode (HIGH signal if 1–3%)
             drop_pct = float(drop_pct)
             if drop_pct <= 0:
                 drop_pct = 1.0
             params_payload.update({"drop_pct": drop_pct})
-            entries = meanrev_drop_entries(df, drop_pct)
+            entries = meanrev_drop_entries(df, drop_pct)  # every oversold bar
         else:
-            # Fallback to z-score with defaults that still produce many signals
             try:
                 lookback = int(lookback) if lookback is not None else 20
             except Exception:
                 lookback = 20
             k_sigma = float(k_sigma) if isinstance(k_sigma, (int, float)) else 1.0
             params_payload.update({"lookback": lookback, "k_sigma": k_sigma})
-            entries = meanrev_entries(df, lookback, k_sigma)  # use your z-score helper
+            entries = meanrev_entries(df, lookback, k_sigma)  # you can also make a z-score_everybar if desired
 
         result = run_backtest_stacking(df, entries, hold_days, initial_equity, position_size)
 
@@ -155,7 +160,6 @@ async def backtest_post(req: Request):
                    (sum(t["return_pct"] for t in trades_payload) / trade_count) if trade_count else 0.0)
     )
 
-    # Include debug counts if present
     debug = result.get("debug", {})
     metrics = {
         "total_pnl": total_pnl,
