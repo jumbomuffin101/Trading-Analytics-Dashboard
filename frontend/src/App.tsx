@@ -2,8 +2,8 @@
 import axios from "axios";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  LineChart, Line, ReferenceLine, ReferenceDot, Label, Brush
-} from "recharts";
+  LineChart, Line, ReferenceLine, ReferenceDot, Label
+} from "recharts"; // ⬅️ Brush removed
 import DrawdownChart from "./components/DrawdownChart";
 import "./index.css";
 
@@ -177,8 +177,9 @@ const PALETTE = {
   tooltipBorder: "var(--border)",
   text: "var(--text)",
   priceLine: "var(--cyan)",
-  equityLine: "var(--accent)",
-  equityFill: "rgba(255,176,0,0.12)",
+  // Bloomberg-like line color (yellow)
+  equityLine: "#F5C400",
+  equityFill: "rgba(245,196,0,0.14)",
   up: "var(--up)",
   down: "var(--down)",
   threshold: "var(--accent)",
@@ -290,9 +291,9 @@ export default function App() {
       }
       const payload: any = {
         symbol, start, end,
-        // legacy fields so your existing backend continues to work
+        // legacy fields for compatibility
         threshold: thr, hold_days: hd,
-        // new strategy API (safe to ignore server-side if unsupported)
+        // optional strategy API
         strategy,
         params:
           strategy === "breakout"
@@ -367,52 +368,13 @@ export default function App() {
           {/* =================== Documentation =================== */}
           <div className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
-
-            <div className="text-sm text-[var(--muted)] mt-2 leading-6">
-              <p className="mb-3 text-[var(--text)]/80">
-                Long-only, threshold breakout on daily closes. Buy the first close that crosses
-                above the threshold after being ≤ it, hold for <em>N</em> days, then exit at the
-                close. Single position; equity moves only on exit days.
-              </p>
-
-              <div className="grid md:grid-cols-3 gap-5">
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-                  <div className="font-semibold text-[var(--text)] mb-1">Strategy at a glance</div>
-                  <ul className="list-disc ml-5 space-y-1">
-                    <li><span className="font-medium">Entry:</span> First close &gt; <em>Threshold</em> after ≤ it.</li>
-                    <li><span className="font-medium">Exit:</span> Fixed horizon: hold <em>N</em> trading days.</li>
-                    <li><span className="font-medium">Positioning:</span> One position; no pyramiding.</li>
-                  </ul>
-                </div>
-
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-                  <div className="font-semibold text-[var(--text)] mb-1">Read the outputs</div>
-                  <ul className="list-disc ml-5 space-y-1">
-                    <li><span className="font-medium">Equity Curve:</span> Steps only on exits.</li>
-                    <li><span className="font-medium">P&amp;L / Win Rate / PF:</span> Realized results quality.</li>
-                    <li><span className="font-medium">Max Drawdown:</span> Worst equity peak→trough.</li>
-                  </ul>
-                </div>
-
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-                  <div className="font-semibold text-[var(--text)] mb-1">Assumptions</div>
-                  <ul className="list-disc ml-5 space-y-1">
-                    <li>Daily OHLCV; close-to-close fills.</li>
-                    <li>No fees, slippage, or leverage.</li>
-                    <li>Threshold on closes (no intraday modeling).</li>
-                  </ul>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
-                <div className="font-semibold text-[var(--text)] mb-1">How to run</div>
-                <ol className="list-decimal ml-5 space-y-1">
-                  <li>Pick a symbol/date range and click <span className="font-medium">Peek</span> for stats &amp; suggested threshold.</li>
-                  <li>Set <span className="font-medium">Threshold</span> and <span className="font-medium">Hold&nbsp;Days</span>.</li>
-                  <li>Click <span className="font-medium">Run Backtest</span> and review equity, trades, and metrics.</li>
-                </ol>
-              </div>
-            </div>
+            <p className="text-sm text-[var(--text)]/80 mt-2 leading-6">
+              Pick a symbol and dates, hit <strong>Peek</strong> for quick stats and a suggested threshold.
+              Choose a <strong>Strategy</strong> and set its parameters, then run the <strong>Backtest</strong>.
+              Review the equity/price charts, trades, and metrics below. Green values indicate favorable results,
+              red indicate unfavorable. Use the <strong>Optimizer Insights</strong> for quick, strategy-aware
+              tweaks to improve performance.
+            </p>
           </div>
 
           {/* Peek & symbols */}
@@ -576,6 +538,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* How this works */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] leading-6">
                 <div className="font-semibold text-[var(--text)] mb-1">How this works</div>
                 <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
@@ -652,8 +615,8 @@ export default function App() {
                         <AreaChart data={result?.equity_curve ?? []} margin={{ left: 68, right: 16, top: 10, bottom: 38 }}>
                           <defs>
                             <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.28} />
-                              <stop offset="95%" stopColor="var(--accent)" stopOpacity={0.04} />
+                              <stop offset="5%" stopColor={PALETTE.equityLine} stopOpacity={0.28} />
+                              <stop offset="95%" stopColor={PALETTE.equityLine} stopOpacity={0.04} />
                             </linearGradient>
                           </defs>
                           <CartesianGrid stroke={PALETTE.grid} vertical={false} />
@@ -673,7 +636,6 @@ export default function App() {
                             formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
                           />
                           <Area type="monotone" dataKey="equity" stroke={PALETTE.equityLine} fill="url(#eqFill)" strokeWidth={2} />
-                          <Brush dataKey="date" height={24} stroke="var(--accent)" travellerWidth={10} />
                         </AreaChart>
                       ) : (
                         <LineChart data={result?.price_series ?? []} margin={{ left: 72, right: 16, top: 10, bottom: 38 }}>
@@ -701,22 +663,22 @@ export default function App() {
                               <ReferenceDot x={t.exit_date} y={t.exit_price} r={4} fill={PALETTE.down} stroke="rgba(0,0,0,0.5)" />
                             </g>
                           ))}
-                          <Brush dataKey="date" height={24} stroke="var(--accent)" travellerWidth={10} />
                         </LineChart>
                       )}
                     </ResponsiveContainer>
                   </div>
 
                   <div className="grid sm:grid-cols-4 gap-4 mt-5">
-                    <Stat label="Profit & Loss (USD)" value={fmtSignedMoney2(result.metrics.total_pnl)} />
-                    <Stat label="Win Rate" value={fmtPct1(result.metrics.win_rate)} />
-                    <Stat label="Annualized Return" value={fmtPct2(result.metrics.annualized_return)} />
-                    <Stat label="Trades" value={String((result.trades ?? []).length)} />
+                    <Stat label="Profit & Loss (USD)" value={fmtSignedMoney2(result.metrics.total_pnl)} numeric={result.metrics.total_pnl} tint />
+                    <Stat label="Annualized Return" value={fmtPct2(result.metrics.annualized_return)} numeric={result.metrics.annualized_return} tint />
+                    <Stat label="Average Trade Return" value={fmtPct2(avgTradeReturn)} numeric={avgTradeReturn} tint />
+                    <Stat label="Max Drawdown" value={fmtPct2(result.metrics.max_drawdown)} numeric={-result.metrics.max_drawdown} tint />
                   </div>
+
                   <div className="grid sm:grid-cols-4 gap-4 mt-4">
                     <Stat label="Final Equity" value={fmtMoney2(result.metrics.final_equity)} />
-                    <Stat label="Max Drawdown" value={fmtPct2(result.metrics.max_drawdown)} />
-                    <Stat label="Average Trade Return" value={fmtPct2(avgTradeReturn)} />
+                    <Stat label="Win Rate" value={fmtPct1(result.metrics.win_rate)} />
+                    <Stat label="Trades" value={String((result.trades ?? []).length)} />
                     <Stat label="Initial Equity" value={fmtMoney2(result.metrics.initial_equity)} />
                   </div>
 
@@ -810,6 +772,7 @@ export default function App() {
                   {/* Optimizer Insights */}
                   {result && (
                     <OptimizerPanel
+                      strategy={strategy}
                       result={result}
                       trades={(tradesWithBars as any) as (Trade & { daysBars?: number })[]}
                     />
@@ -831,15 +794,25 @@ export default function App() {
 }
 
 /* ========== Small UI bits ========== */
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({
+  label, value, sub, numeric, tint = false
+}: {
+  label: string; value: string; sub?: string; numeric?: number | null; tint?: boolean;
+}) {
+  const tone =
+    tint && Number.isFinite(numeric)
+      ? (numeric! > 0 ? "text-up" : numeric! < 0 ? "text-down" : "text-[var(--text)]")
+      : "text-[var(--text)]";
+
   return (
     <div className="p-5 rounded-xl bg-[var(--panel)] border border-[var(--border)]">
       <div className="text-sm text-[var(--muted)]">{label}</div>
-      <div className="text-2xl font-semibold tabular-nums whitespace-nowrap leading-snug text-[var(--text)]">{value}</div>
+      <div className={`text-2xl font-semibold tabular-nums whitespace-nowrap leading-snug ${tone}`}>{value}</div>
       {sub && <div className="text-xs text-[var(--muted)] mt-1">{sub}</div>}
     </div>
   );
 }
+
 function Row({ k, v, tone }: { k: string; v: any; tone?: "win" | "loss" }) {
   const c = tone === "win" ? "text-up" : tone === "loss" ? "text-down" : "text-[var(--text)]/80";
   return <div className={`flex justify-between ${c}`}><span>{k}</span><span className="tabular-nums">{v}</span></div>;
@@ -850,9 +823,11 @@ function Th({ children, onClick }: { children: any; onClick?: () => void }) {
 
 /* ========== Optimizer Panel (vertical tiles + real suggestions) ========== */
 function OptimizerPanel({
+  strategy,
   result,
   trades,
 }: {
+  strategy: StrategyKey;
   result: BacktestResponse;
   trades: (Trade & { daysBars?: number })[];
 }) {
@@ -875,35 +850,29 @@ function OptimizerPanel({
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
   const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
-  // ---- REAL suggestions ----
+  // ---- Strategy-aware suggestions ----
   const sugg: string[] = [];
   const mdd = result.metrics.max_drawdown;
   const ann = result.metrics.annualized_return;
   const hdCfg = Number(result.params.hold_days || 0);
 
-  if (trades.length < 5) {
-    sugg.push("Few trades — widen date range or lower the threshold to collect more samples.");
+  // generic health checks
+  if (trades.length < 5) sugg.push("Few trades — widen date range or loosen entry to collect more samples.");
+  if (expectancy <= 0 && trades.length >= 5) sugg.push("Negative expectancy — nudge entries tighter or exits sooner to cut losers faster.");
+  if (profitFactor < 1 && trades.length >= 5) sugg.push("Profit factor < 1 — improve R/R by tightening entries or shortening holds.");
+  if (mdd > 0.20) sugg.push("Max drawdown > 20% — add a simple trend filter (e.g., 50D MA) or a stop.");
+  if (Math.abs(ann) < 0.02 && trades.length >= 10) sugg.push("Low annualized return — sweep nearby parameters (small grid).");
+  if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) sugg.push("Average bars exceed configured hold — verify alignment or use fixed-bars exit.");
+
+  // strategy-specific nudges
+  if (strategy === "breakout") {
+    sugg.unshift("Breakout: try threshold ±2–5% around suggested and hold 2–5 days.");
+  } else if (strategy === "sma_cross") {
+    sugg.unshift("SMA Cross: test fast/slow pairs like 5/20, 10/30, 20/50; require price above slow to reduce chop.");
+  } else if (strategy === "mean_rev") {
+    sugg.unshift("Mean Reversion: sweep drop% from 1–4% and short holds (2–4 days); consider exit on snap-back to MA.");
   }
-  if (expectancy <= 0 && trades.length >= 5) {
-    sugg.push("Negative expectancy — lower the threshold slightly or reduce hold days by 1–2 to cut losers faster.");
-  } else if (profitFactor < 1 && trades.length >= 5) {
-    sugg.push("Profit factor < 1 — raise the threshold or shorten hold days to improve reward/risk.");
-  }
-  if (hitRate < 0.45 && profitFactor >= 1.1) {
-    sugg.push("Low hit rate with acceptable PF — keep R/R high; consider a slightly higher threshold to skip marginal entries.");
-  }
-  if (mdd > 0.20) {
-    sugg.push("Max drawdown > 20% — add a simple trend filter (e.g., 50D MA) or a stop-loss to cap downside.");
-  }
-  if (Math.abs(ann) < 0.02 && trades.length >= 10) {
-    sugg.push("Low annualized return — sweep hold days 2–5 and thresholds around the suggested value (±2–5%).");
-  }
-  if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) {
-    sugg.push("Average bars exceed configured hold — verify date alignment or use a fixed-bars exit.");
-  }
-  if (sugg.length < 2) {
-    sugg.push("Run a quick parameter sweep: test thresholds near the suggested level and hold days 2–5.");
-  }
+  if (sugg.length < 2) sugg.push("Run a quick parameter sweep near current settings.");
 
   return (
     <div className="card p-6 flex-1 flex flex-col">
@@ -912,12 +881,9 @@ function OptimizerPanel({
       </h3>
 
       <div className="flex flex-col gap-2 mb-4">
-        <MetricRow
-          label="Profit Factor"
-          value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"}
-        />
-        <MetricRow label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} />
-        <MetricRow label="Hit Rate" value={fmtPct2(hitRate)} />
+        <MetricRow label="Profit Factor" value={Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "∞"} numeric={profitFactor - 1} tint />
+        <MetricRow label="Expectancy / Trade" value={fmtSignedMoney2(expectancy)} numeric={expectancy} tint />
+        <MetricRow label="Hit Rate" value={fmtPct2(hitRate)} numeric={hitRate - 0.5} tint />
         <MetricRow label="Avg Bars (Median)" value={`${avgBars.toFixed(1)} (${medBars})`} />
       </div>
 
@@ -933,7 +899,7 @@ function OptimizerPanel({
   );
 }
 /* Short, wide metric row with adaptive value sizing */
-function MetricRow({ label, value }: { label: string; value: string }) {
+function MetricRow({ label, value, numeric, tint = false }: { label: string; value: string; numeric?: number; tint?: boolean }) {
   const s = String(value);
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
 
@@ -944,10 +910,15 @@ function MetricRow({ label, value }: { label: string; value: string }) {
       ? "text-lg sm:text-xl"
       : "text-xl sm:text-2xl";
 
+  const tone =
+    tint && Number.isFinite(numeric)
+      ? (numeric! > 0 ? "text-up" : numeric! < 0 ? "text-down" : "text-[var(--text)]")
+      : "text-[var(--text)]";
+
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 py-2 h-14 flex items-center justify-between">
       <div className="text-[11px] sm:text-xs text-[var(--muted)] mr-3">{label}</div>
-      <div className={`${valueSize} font-semibold tabular-nums leading-none text-[var(--text)]`}>
+      <div className={`${valueSize} font-semibold tabular-nums leading-none ${tone}`}>
         {s}
       </div>
     </div>
