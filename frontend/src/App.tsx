@@ -644,7 +644,7 @@ function OptimizerPanel({
   const avgBars = bars.length ? sum(bars) / bars.length : 0;
   const medBars = bars.length ? [...bars].sort((a, b) => a - b)[Math.floor(bars.length / 2)] : 0;
 
-  // ---- REAL suggestions ----
+  // ---- REAL suggestions (no generic filler) ----
   const sugg: string[] = [];
   const mdd = result.metrics.max_drawdown;
   const ann = result.metrics.annualized_return;
@@ -670,6 +670,8 @@ function OptimizerPanel({
   if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) {
     sugg.push("Average bars exceed configured hold — verify date alignment or use a fixed-bars exit.");
   }
+
+  // Ensure at least two concrete actions
   if (sugg.length < 2) {
     sugg.push("Run a quick parameter sweep: test thresholds near the suggested level and hold days 2–5.");
   }
@@ -708,6 +710,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   const s = String(value);
   const significantLen = s.replace(/[^\d.%$\-+]/g, "").length;
 
+  // Keep rows short; value font adapts to length and screen size
   const valueSize =
     significantLen > 12
       ? "text-base sm:text-lg"
