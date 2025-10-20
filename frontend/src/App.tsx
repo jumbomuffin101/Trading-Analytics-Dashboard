@@ -294,19 +294,23 @@ export default function App() {
     else { setSortKey(key); setSortDir("asc"); }
   };
 
-  return (
-    <div className="theme-terminal">
-      <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-        <div className="relative overflow-hidden">
-          <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
-            <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">$</div>
-              <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
+return (
+  <div className="theme-terminal">
+    <div className="page-root min-h-screen bg-[var(--bg)] text-[var(--text)]">
+      <div className="relative overflow-hidden">
+        <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
+          <div className="flex items-center gap-3">
+            <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">
+              $
             </div>
+            <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
           </div>
         </div>
+      </div>
 
-        <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
+      <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
+        {/* === your existing sections start here (Documentation, Peek, etc.) === */}
+
           {/* =================== Documentation =================== */}
           <div className="card p-6 sm:p-7">
             <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
@@ -536,7 +540,12 @@ export default function App() {
                             <Label value="Equity ($)" angle={-90} position="insideLeft" offset={14} dx={-60} dy={30} fill={PALETTE.axis} />
                           </YAxis>
                           <Tooltip
-                            contentStyle={{ background: PALETTE.tooltipBg, border: `1px solid ${getComputedStyle(document.documentElement).getPropertyValue('--border') || '#1f222b'}`, borderRadius: 12, color: PALETTE.text }}
+                            contentStyle={{
+                              background: "var(--panel)",
+                              border: "1px solid var(--border)",    // ⬅️ simpler + reliable
+                              borderRadius: 12,
+                              color: "var(--text)",
+                            }}
                             formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
                           />
                           <Area type="monotone" dataKey="equity" stroke={PALETTE.equityLine} fill="url(#eqFill)" strokeWidth={2} />
@@ -551,7 +560,12 @@ export default function App() {
                             <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-20} fill={PALETTE.axis} />
                           </YAxis>
                           <Tooltip
-                            contentStyle={{ background: PALETTE.tooltipBg, border: `1px solid ${getComputedStyle(document.documentElement).getPropertyValue('--border') || '#1f222b'}`, borderRadius: 12, color: PALETTE.text }}
+                            contentStyle={{
+                              background: "var(--panel)",
+                              border: "1px solid var(--border)",    // ⬅️ use the var directly
+                              borderRadius: 12,
+                              color: "var(--text)",
+                            }}
                             formatter={(v: any) => [fmtMoney2(v as number), "Close"]}
                           />
                           <Line type="monotone" dataKey="close" stroke={PALETTE.priceLine} dot={false} strokeWidth={2} />

@@ -119,3 +119,82 @@ body { font-size: 17px; }
 }
 .input::placeholder { color: var(--muted); }
 .input:focus { outline: none; border-color: var(--accent); }
+
+/* === TERMINAL THEME OVERRIDES (Bloomberg style) === */
+/* Scope all overrides under .theme-terminal so they beat @apply defaults */
+.theme-terminal .page-root {
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+/* Cards */
+.theme-terminal .card {
+  background-color: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 0.75rem !important;
+}
+
+/* Headings in sections (so labels like "Drawdown", "Peek & Symbols" pop) */
+.theme-terminal .card h3,
+.theme-terminal h3.section-title {
+  color: var(--accent) !important;
+}
+
+/* Buttons */
+.theme-terminal .btn-accent,
+.theme-terminal .btn-primary {
+  background: var(--accent) !important;
+  color: #0b0c10 !important;
+  border: 1px solid var(--accent) !important;
+}
+.theme-terminal .btn-ghost {
+  background: transparent !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+.theme-terminal .btn-accent:hover,
+.theme-terminal .btn-primary:hover { filter: brightness(1.05); }
+.theme-terminal .btn-ghost:hover { border-color: var(--accent); }
+
+/* Inputs */
+.theme-terminal .input {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+.theme-terminal .input::placeholder { color: var(--muted) !important; }
+.theme-terminal .input:focus { outline: none !important; border-color: var(--accent) !important; }
+
+/* Quick symbol chips */
+.theme-terminal .chip {
+  padding: 0.35rem 0.75rem !important;
+  border-radius: 9999px !important;
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  font-weight: 600 !important;
+  transition: border-color .15s ease, background .15s ease, color .15s ease !important;
+}
+.theme-terminal .chip:hover { border-color: var(--accent) !important; }
+.theme-terminal .chip.active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #0b0c10 !important;
+}
+
+/* Tables / subtle bits */
+.theme-terminal .table th, 
+.theme-terminal .table td {
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+.theme-terminal .table thead th {
+  background: rgba(17, 18, 24, 0.8) !important; /* var(--panel) with alpha */
+  backdrop-filter: blur(2px);
+}
+
+/* Recharts default text color when not explicitly set */
+.theme-terminal .recharts-cartesian-axis-tick-value,
+.theme-terminal .recharts-default-tooltip {
+  color: var(--text) !important;
+}
