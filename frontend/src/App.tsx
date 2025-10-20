@@ -168,6 +168,21 @@ const fmtSignedMoney2 = (v:number) =>
 type ChartMode = "equity" | "price";
 type SortKey = "entry_date" | "exit_date" | "pnl" | "return_pct" | "daysBars";
 
+/* ========== Terminal palette for Recharts ========== */
+const PALETTE = {
+  grid: "var(--grid)",
+  axis: "var(--muted)",
+  tooltipBg: "var(--panel)",
+  tooltipBorder: "var(--border)",
+  text: "var(--text)",
+  priceLine: "var(--cyan)",
+  equityLine: "var(--accent)",
+  equityFill: "rgba(255,176,0,0.12)", // accent w/ alpha
+  up: "var(--up)",
+  down: "var(--down)",
+  threshold: "var(--accent)",
+};
+
 /* ========== Main App ========== */
 export default function App() {
   const today = new Date();
@@ -280,359 +295,395 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen">
-      <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-black" />
-        <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
-          <div className="flex items-center gap-3">
-            <div className="h-11 w-11 rounded-xl bg-emerald-600 flex items-center justify-center font-black">$</div>
-            <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
-          </div>
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
-        {/* =================== Documentation =================== */}
-<div className="card p-6 sm:p-7">
-  <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Documentation</h3>
-
-  <div className="text-sm text-slate-300 mt-2 leading-6">
-    <p className="mb-3 text-slate-300">
-      Long-only, threshold breakout on daily closes. Buy the first close that crosses
-      above the threshold after being ≤ it, hold for <em>N</em> days, then exit at the
-      close. Single position; equity moves only on exit days.
-    </p>
-
-    <div className="grid md:grid-cols-3 gap-5">
-      <div className="rounded-xl border border-slate-800/60 bg-slate-900/30 p-4">
-        <div className="font-semibold text-slate-200 mb-1">Strategy at a glance</div>
-        <ul className="list-disc ml-5 space-y-1">
-          <li><span className="font-medium">Entry:</span> First close &gt; <em>Threshold</em> after ≤ it.</li>
-          <li><span className="font-medium">Exit:</span> Fixed horizon: hold <em>N</em> trading days.</li>
-          <li><span className="font-medium">Positioning:</span> One position; no pyramiding.</li>
-        </ul>
-      </div>
-
-      <div className="rounded-xl border border-slate-800/60 bg-slate-900/30 p-4">
-        <div className="font-semibold text-slate-200 mb-1">Read the outputs</div>
-        <ul className="list-disc ml-5 space-y-1">
-          <li><span className="font-medium">Equity Curve:</span> Steps only on exits.</li>
-          <li><span className="font-medium">P&amp;L / Win Rate / PF:</span> Realized results quality.</li>
-          <li><span className="font-medium">Max Drawdown:</span> Worst equity peak→trough.</li>
-        </ul>
-      </div>
-
-      <div className="rounded-xl border border-slate-800/60 bg-slate-900/30 p-4">
-        <div className="font-semibold text-slate-200 mb-1">Assumptions</div>
-        <ul className="list-disc ml-5 space-y-1">
-          <li>Daily OHLCV; close-to-close fills.</li>
-          <li>No fees, slippage, or leverage.</li>
-          <li>Threshold on closes (no intraday modeling).</li>
-        </ul>
-      </div>
-    </div>
-
-    <div className="mt-4 rounded-xl border border-slate-800/60 bg-slate-900/30 p-4">
-      <div className="font-semibold text-slate-200 mb-1">How to run</div>
-      <ol className="list-decimal ml-5 space-y-1">
-        <li>Pick a symbol/date range and click <span className="font-medium">Peek</span> for stats &amp; suggested threshold.</li>
-        <li>Set <span className="font-medium">Threshold</span> and <span className="font-medium">Hold&nbsp;Days</span>.</li>
-        <li>Click <span className="font-medium">Run Backtest</span> and review equity, trades, and metrics.</li>
-      </ol>
-    </div>
-  </div>
-</div>
-
-
-        {/* Peek & symbols */}
-        <div className="card p-6 sm:p-7">
-          <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Peek &amp; Symbols</h3>
-          <div className="text-xs text-slate-400 mt-1 mb-3">Type or pick a symbol, choose dates, and click Peek.</div>
-
-          <div className="flex flex-wrap gap-2 mb-3">
-            {PRESETS.map((sym) => (
-              <button
-                key={sym}
-                className={"chip " + (symbol === sym ? "active" : "")}
-                onClick={() => setSymbol(sym)}
-                type="button"
-              >
-                {sym}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <label className="text-sm">
-              <div className="mb-1 text-slate-300">Symbol</div>
-              <input
-                className="input"
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                list="symbols"
-                placeholder="e.g. AAPL"
-              />
-              <datalist id="symbols">{PRESETS.map((s) => <option key={s} value={s} />)}</datalist>
-            </label>
-            <label className="text-sm">
-              <div className="mb-1 text-slate-300">Start</div>
-              <input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} max={ydayISO} />
-            </label>
-            <label className="text-sm">
-              <div className="mb-1 text-slate-300">End</div>
-              <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} max={ydayISO} />
-            </label>
-          </div>
-
-          <div className="flex flex-wrap gap-3 mt-4 items-center">
-            <button className="btn-primary" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
-              {peekBusy ? "Peeking…" : "Peek"}
-            </button>
-            {error && <span className="text-rose-400">Error: {error}</span>}
+    <div className="theme-terminal">
+      <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+        <div className="relative overflow-hidden">
+          <div className="relative mx-auto max-w-6xl px-4 pt-10 pb-6">
+            <div className="flex items-center gap-3">
+              <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">$</div>
+              <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
+            </div>
           </div>
         </div>
 
-        {/* Peek snapshot */}
-        {peek && (
-          <div className="card p-8 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-2xl font-bold tracking-tight text-emerald-400">
-                  {peek.symbol} Market Snapshot
-                </h3>
-                {/* EXACT user-selected dates; show backend span only if different */}
-                <div className="text-sm text-slate-400">
-                  {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
-                  {(peek.start && peek.end) && (peek.start !== start || peek.end !== end) && (
-                    <span className="ml-2 text-xs text-slate-500">
-                      (data span {fmtDate(peek.start)} – {fmtDate(peek.end)})
-                    </span>
-                  )}
+        <div className="mx-auto max-w-6xl px-4 pt-1 pb-10 space-y-8">
+          {/* =================== Documentation =================== */}
+          <div className="card p-6 sm:p-7">
+            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Documentation</h3>
+
+            <div className="text-sm text-[var(--muted)] mt-2 leading-6">
+              <p className="mb-3 text-[var(--text)]/80">
+                Long-only, threshold breakout on daily closes. Buy the first close that crosses
+                above the threshold after being ≤ it, hold for <em>N</em> days, then exit at the
+                close. Single position; equity moves only on exit days.
+              </p>
+
+              <div className="grid md:grid-cols-3 gap-5">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                  <div className="font-semibold text-[var(--text)] mb-1">Strategy at a glance</div>
+                  <ul className="list-disc ml-5 space-y-1">
+                    <li><span className="font-medium">Entry:</span> First close &gt; <em>Threshold</em> after ≤ it.</li>
+                    <li><span className="font-medium">Exit:</span> Fixed horizon: hold <em>N</em> trading days.</li>
+                    <li><span className="font-medium">Positioning:</span> One position; no pyramiding.</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                  <div className="font-semibold text-[var(--text)] mb-1">Read the outputs</div>
+                  <ul className="list-disc ml-5 space-y-1">
+                    <li><span className="font-medium">Equity Curve:</span> Steps only on exits.</li>
+                    <li><span className="font-medium">P&amp;L / Win Rate / PF:</span> Realized results quality.</li>
+                    <li><span className="font-medium">Max Drawdown:</span> Worst equity peak→trough.</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                  <div className="font-semibold text-[var(--text)] mb-1">Assumptions</div>
+                  <ul className="list-disc ml-5 space-y-1">
+                    <li>Daily OHLCV; close-to-close fills.</li>
+                    <li>No fees, slippage, or leverage.</li>
+                    <li>Threshold on closes (no intraday modeling).</li>
+                  </ul>
                 </div>
               </div>
-              <div className="text-sm text-slate-400">Rows: {peek.rows}</div>
-            </div>
 
-            <div className="grid sm:grid-cols-4 gap-4">
-              <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
-              <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
-              <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
-              <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile" />
+              <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                <div className="font-semibold text-[var(--text)] mb-1">How to run</div>
+                <ol className="list-decimal ml-5 space-y-1">
+                  <li>Pick a symbol/date range and click <span className="font-medium">Peek</span> for stats &amp; suggested threshold.</li>
+                  <li>Set <span className="font-medium">Threshold</span> and <span className="font-medium">Hold&nbsp;Days</span>.</li>
+                  <li>Click <span className="font-medium">Run Backtest</span> and review equity, trades, and metrics.</li>
+                </ol>
+              </div>
             </div>
           </div>
-        )}
 
-        {/* Strategy Parameters */}
-        <div className="card p-6 sm:p-7">
-          <h3 className="text-2xl font-bold tracking-tight text-emerald-400 mb-3">Strategy Parameters</h3>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
-              <label className="text-sm">
-                <div className="mb-1 text-slate-300">Threshold</div>
-                <input
-                  className={"input " + (thrInvalid ? "ring-2 ring-rose-500" : "")}
-                  inputMode="decimal"
-                  step="any"
-                  value={threshold}
-                  onChange={(e) => setThreshold(e.target.value)}
-                  placeholder="e.g. 185.75"
-                />
-              </label>
-              <label className="text-sm">
-                <div className="mb-1 text-slate-300">Hold Days</div>
-                <input
-                  className={"input " + (hdInvalid ? "ring-2 ring-rose-500" : "")}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  min={1}
-                  value={holdDays}
-                  onChange={(e) => setHoldDays(e.target.value)}
-                  placeholder=">= 1"
-                />
-              </label>
-              <div className="sm:col-span-2 flex items-center gap-3">
-                <button className="btn-primary" onClick={doBacktest} disabled={loading || !canPeek}>
-                  Run Backtest
+          {/* Peek & symbols */}
+          <div className="card p-6 sm:p-7">
+            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Peek &amp; Symbols</h3>
+            <div className="text-xs text-[var(--muted)] mt-1 mb-3">Type or pick a symbol, choose dates, and click Peek.</div>
+
+            <div className="flex flex-wrap gap-2 mb-3">
+              {PRESETS.map((sym) => (
+                <button
+                  key={sym}
+                  className={"chip " + (symbol === sym ? "active" : "")}
+                  onClick={() => setSymbol(sym)}
+                  type="button"
+                >
+                  {sym}
                 </button>
-                {/* ❌ Removed Export CSV button and handler */}
-              </div>
+              ))}
             </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-[13px] leading-6">
-              <div className="font-semibold text-slate-200 mb-1">How this strategy works</div>
-              <ul className="list-disc ml-5 text-slate-300 space-y-1">
-                <li><span className="font-medium">Threshold</span>: go long when the close crosses <strong>above</strong> this price.</li>
-                <li><span className="font-medium">Hold Days</span>: hold for N trading days; exit at that day’s close.</li>
-                <li>One position at a time; P&amp;L realized on exits and added to cash-only equity.</li>
-              </ul>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <label className="text-sm">
+                <div className="mb-1 text-[var(--text)]/80">Symbol</div>
+                <input
+                  className="input"
+                  value={symbol}
+                  onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                  list="symbols"
+                  placeholder="e.g. AAPL"
+                />
+                <datalist id="symbols">{PRESETS.map((s) => <option key={s} value={s} />)}</datalist>
+              </label>
+              <label className="text-sm">
+                <div className="mb-1 text-[var(--text)]/80">Start</div>
+                <input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} max={ydayISO} />
+              </label>
+              <label className="text-sm">
+                <div className="mb-1 text-[var(--text)]/80">End</div>
+                <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} max={ydayISO} />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mt-4 items-center">
+              <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doPeek} disabled={loading || peekBusy || !canPeek}>
+                {peekBusy ? "Peeking…" : "Peek"}
+              </button>
+              {error && <span className="text-down">Error: {error}</span>}
             </div>
           </div>
-        </div>
 
-        {/* Backtest Results */}
-        {result && (
-          <>
-            <div className="grid lg:grid-cols-3 gap-8 items-stretch">
-              <div className="card p-6 lg:col-span-2 flex flex-col">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-2xl font-bold tracking-tight text-emerald-400">Backtest Results</h3>
-                  <div className="flex items-center gap-2 text-sm text-slate-400">
-                    {fmtDate(start)} – {fmtDate(end)} • {result.symbol}
-                    <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-1 ml-3">
-                      <button className={"px-3 py-1 rounded-md " + (mode === "equity" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={() => setMode("equity")}>Equity</button>
-                      <button className={"px-3 py-1 rounded-md " + (mode === "price" ? "bg-emerald-600 text-white" : "text-slate-200")} onClick={() => setMode("price")}>Price</button>
-                    </div>
+          {/* Peek snapshot */}
+          {peek && (
+            <div className="card p-8 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">
+                    {peek.symbol} Market Snapshot
+                  </h3>
+                  {/* EXACT user-selected dates; show backend span only if different */}
+                  <div className="text-sm text-[var(--muted)]">
+                    {start && end ? `${fmtDate(start)} – ${fmtDate(end)}` : "—"}
+                    {(peek.start && peek.end) && (peek.start !== start || peek.end !== end) && (
+                      <span className="ml-2 text-xs text-[var(--muted)]/70">
+                        (data span {fmtDate(peek.start)} – {fmtDate(peek.end)})
+                      </span>
+                    )}
                   </div>
                 </div>
-
-                <div className="w-full h-[380px] mt-2">
-                  <ResponsiveContainer>
-                    {mode === "equity" ? (
-                      <AreaChart data={result?.equity_curve ?? []} margin={{ left: 68, right: 16, top: 10, bottom: 38 }}>
-                        <defs>
-                          <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.32} />
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0.03} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false} />
-                        <XAxis dataKey="date" tickMargin={12} stroke="#94a3b8" tickFormatter={(d) => new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit" }).format(new Date(d))}>
-                          <Label value="Date" position="bottom" offset={24} fill="#94a3b8" />
-                        </XAxis>
-                        <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
-                          <Label value="Equity ($)" angle={-90} position="insideLeft" offset={14} dx={-60} dy={30} fill="#94a3b8" />
-                        </YAxis>
-                        <Tooltip
-                          contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }}
-                          formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
-                        />
-                        <Area type="monotone" dataKey="equity" stroke="#10b981" fill="url(#eqFill)" strokeWidth={2} />
-                      </AreaChart>
-                    ) : (
-                      <LineChart data={result?.price_series ?? []} margin={{ left: 72, right: 16, top: 10, bottom: 38 }}>
-                        <CartesianGrid stroke="rgba(148,163,184,0.15)" vertical={false} />
-                        <XAxis dataKey="date" tickMargin={12} stroke="#94a3b8" tickFormatter={xTickFormatter}>
-                          <Label value="Date" position="bottom" offset={24} fill="#94a3b8" />
-                        </XAxis>
-                        <YAxis stroke="#94a3b8" tickFormatter={fmtMoney} tickMargin={10}>
-                          <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-20} fill="#94a3b8" />
-                        </YAxis>
-                        <Tooltip
-                          contentStyle={{ background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12 }}
-                          formatter={(v: any) => [fmtMoney2(v as number), "Close"]}
-                        />
-                        <Line type="monotone" dataKey="close" stroke="#60a5fa" dot={false} strokeWidth={2} />
-                        <ReferenceLine y={Number(result?.params?.threshold ?? threshold) || undefined} stroke="#f59e0b" strokeDasharray="4 4" />
-                        {(result?.trades ?? []).map((t, i) => (
-                          <g key={i}>
-                            <ReferenceDot x={t.entry_date} y={t.entry_price} r={4} fill="#10b981" stroke="#064e3b" />
-                            <ReferenceDot x={t.exit_date} y={t.exit_price} r={4} fill="#ef4444" stroke="#7f1d1d" />
-                          </g>
-                        ))}
-                      </LineChart>
-                    )}
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="grid sm:grid-cols-4 gap-4 mt-5">
-                  <Stat label="Profit & Loss (USD)" value={fmtSignedMoney2(result.metrics.total_pnl)} />
-                  <Stat label="Win Rate" value={fmtPct1(result.metrics.win_rate)} />
-                  <Stat label="Annualized Return" value={fmtPct2(result.metrics.annualized_return)} />
-                  <Stat label="Trades" value={String((result.trades ?? []).length)} />
-                </div>
-                <div className="grid sm:grid-cols-4 gap-4 mt-4">
-                  <Stat label="Final Equity" value={fmtMoney2(result.metrics.final_equity)} />
-                  <Stat label="Max Drawdown" value={fmtPct2(result.metrics.max_drawdown)} />
-                  <Stat label="Average Trade Return" value={fmtPct2(avgTradeReturn)} />
-                  <Stat label="Initial Equity" value={fmtMoney2(result.metrics.initial_equity)} />
-                </div>
-
-                <div className="mt-3 text-xs text-slate-400 italic">
-                  Equity starts at {fmtMoney2(result.metrics.initial_equity)} and steps up/down only on exit days (one position at a time).
-                </div>
+                <div className="text-sm text-[var(--muted)]">Rows: {peek.rows}</div>
               </div>
 
-              {/* Trades + Optimizer */}
-              <div className="flex flex-col h-full">
-                <div className="card p-6 mb-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-2xl font-bold tracking-tight text-emerald-400">
-                      Trades ({tradesWithBars.length})
-                    </h3>
-                    <div className="flex gap-2 text-xs text-slate-400">
-                      <button className={"px-3 py-1 rounded-md border " + (tradeView === "cards" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-700 text-slate-300")} onClick={() => setTradeView("cards")}>Cards</button>
-                      <button className={"px-3 py-1 rounded-md border " + (tradeView === "table" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-700 text-slate-300")} onClick={() => setTradeView("table")}>Table</button>
-                    </div>
-                  </div>
+              <div className="grid sm:grid-cols-4 gap-4">
+                <Stat label="Min Close" value={peek.min_close.toFixed(2)} />
+                <Stat label="Median Close" value={peek.median_close.toFixed(2)} />
+                <Stat label="Max Close" value={peek.max_close.toFixed(2)} />
+                <Stat label="Suggested Threshold" value={peek.suggested_threshold.toFixed(2)} sub="75th percentile" />
+              </div>
+            </div>
+          )}
 
-                  {tradeView === "cards" ? (
-                    <div className="overflow-x-auto">
-                      <div className="grid auto-cols-[210px] grid-flow-col gap-4">
-                        {tradesWithBars.map((t, i) => {
-                          const positive = t.pnl >= 0;
-                          return (
-                            <div key={i} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-                              <div className="text-sm font-semibold text-slate-200 mb-2">{t.entry_date}</div>
-                              <div className="text-sm text-slate-300 space-y-1">
-                                <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
-                                <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
-                                <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
-                                <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
-                                <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
-                                <div className="flex justify-end">
-                                  <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-emerald-900/40 text-emerald-300" : "bg-rose-900/40 text-rose-300")}>
-                                    {positive ? "Win" : "Loss"}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+          {/* Strategy Parameters */}
+          <div className="card p-6 sm:p-7">
+            <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">Strategy Parameters</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:col-span-2">
+                <label className="text-sm">
+                  <div className="mb-1 text-[var(--text)]/80">Threshold</div>
+                  <input
+                    className={"input " + (thrInvalid ? "ring-2 ring-[var(--down)]" : "")}
+                    inputMode="decimal"
+                    step="any"
+                    value={threshold}
+                    onChange={(e) => setThreshold(e.target.value)}
+                    placeholder="e.g. 185.75"
+                  />
+                </label>
+                <label className="text-sm">
+                  <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
+                  <input
+                    className={"input " + (hdInvalid ? "ring-2 ring-[var(--down)]" : "")}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    min={1}
+                    value={holdDays}
+                    onChange={(e) => setHoldDays(e.target.value)}
+                    placeholder=">= 1"
+                  />
+                </label>
+                <div className="sm:col-span-2 flex items-center gap-3">
+                  <button className="btn-accent px-3 py-2 rounded-lg text-sm font-medium" onClick={doBacktest} disabled={loading || !canPeek}>
+                    Run Backtest
+                  </button>
+                  {/* ❌ Removed Export CSV button and handler */}
+                </div>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] leading-6">
+                <div className="font-semibold text-[var(--text)] mb-1">How this strategy works</div>
+                <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
+                  <li><span className="font-medium">Threshold</span>: go long when the close crosses <strong>above</strong> this price.</li>
+                  <li><span className="font-medium">Hold Days</span>: hold for N trading days; exit at that day’s close.</li>
+                  <li>One position at a time; P&amp;L realized on exits and added to cash-only equity.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* Backtest Results */}
+          {result && (
+            <>
+              <div className="grid lg:grid-cols-3 gap-8 items-stretch">
+                <div className="card p-6 lg:col-span-2 flex flex-col">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">Backtest Results</h3>
+                    <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                      {fmtDate(start)} – {fmtDate(end)} • {result.symbol}
+                      <div className="bg-[var(--panel)] border border-[var(--border)] rounded-lg p-1 ml-3">
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border " +
+                            (mode === "equity"
+                              ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]"
+                              : "bg-transparent text-[var(--text)] border-[var(--border)]")
+                          }
+                          onClick={() => setMode("equity")}
+                        >
+                          Equity
+                        </button>
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border ml-1 " +
+                            (mode === "price"
+                              ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]"
+                              : "bg-transparent text-[var(--text)] border-[var(--border)]")
+                          }
+                          onClick={() => setMode("price")}
+                        >
+                          Price
+                        </button>
                       </div>
                     </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="table text-sm w-full">
-                        <thead>
-                          <tr>
-                            <Th onClick={() => toggleSort("entry_date")}>Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                            <Th onClick={() => toggleSort("exit_date")}>Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                            <Th>Entry</Th><Th>Exit</Th>
-                            <Th onClick={() => toggleSort("pnl")}>PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                            <Th onClick={() => toggleSort("return_pct")}>Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                            <Th onClick={() => toggleSort("daysBars")}>Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {tradesWithBars.map((t, i) => (
-                            <tr key={i} className={t.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}>
-                              <td>{t.entry_date}</td><td>{t.exit_date}</td>
-                              <td>{t.entry_price.toFixed(2)}</td><td>{t.exit_price.toFixed(2)}</td>
-                              <td>{t.pnl.toFixed(2)}</td><td>{(t.return_pct * 100).toFixed(2)}%</td>
-                              <td>{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</td>
-                            </tr>
+                  </div>
+
+                  <div className="w-full h-[380px] mt-2">
+                    <ResponsiveContainer>
+                      {mode === "equity" ? (
+                        <AreaChart data={result?.equity_curve ?? []} margin={{ left: 68, right: 16, top: 10, bottom: 38 }}>
+                          <defs>
+                            <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.28} />
+                              <stop offset="95%" stopColor="var(--accent)" stopOpacity={0.04} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid stroke={PALETTE.grid} vertical={false} />
+                          <XAxis dataKey="date" tickMargin={12} stroke={PALETTE.axis} tickFormatter={(d) => new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit" }).format(new Date(d))}>
+                            <Label value="Date" position="bottom" offset={24} fill={PALETTE.axis} />
+                          </XAxis>
+                          <YAxis stroke={PALETTE.axis} tickFormatter={fmtMoney} tickMargin={10}>
+                            <Label value="Equity ($)" angle={-90} position="insideLeft" offset={14} dx={-60} dy={30} fill={PALETTE.axis} />
+                          </YAxis>
+                          <Tooltip
+                            contentStyle={{ background: PALETTE.tooltipBg, border: `1px solid ${getComputedStyle(document.documentElement).getPropertyValue('--border') || '#1f222b'}`, borderRadius: 12, color: PALETTE.text }}
+                            formatter={(v: any) => [fmtMoney2(v as number), "Equity"]}
+                          />
+                          <Area type="monotone" dataKey="equity" stroke={PALETTE.equityLine} fill="url(#eqFill)" strokeWidth={2} />
+                        </AreaChart>
+                      ) : (
+                        <LineChart data={result?.price_series ?? []} margin={{ left: 72, right: 16, top: 10, bottom: 38 }}>
+                          <CartesianGrid stroke={PALETTE.grid} vertical={false} />
+                          <XAxis dataKey="date" tickMargin={12} stroke={PALETTE.axis} tickFormatter={xTickFormatter}>
+                            <Label value="Date" position="bottom" offset={24} fill={PALETTE.axis} />
+                          </XAxis>
+                          <YAxis stroke={PALETTE.axis} tickFormatter={fmtMoney} tickMargin={10}>
+                            <Label value="Price ($)" angle={-90} position="insideLeft" offset={14} dx={-20} fill={PALETTE.axis} />
+                          </YAxis>
+                          <Tooltip
+                            contentStyle={{ background: PALETTE.tooltipBg, border: `1px solid ${getComputedStyle(document.documentElement).getPropertyValue('--border') || '#1f222b'}`, borderRadius: 12, color: PALETTE.text }}
+                            formatter={(v: any) => [fmtMoney2(v as number), "Close"]}
+                          />
+                          <Line type="monotone" dataKey="close" stroke={PALETTE.priceLine} dot={false} strokeWidth={2} />
+                          <ReferenceLine y={Number(result?.params?.threshold ?? threshold) || undefined} stroke={PALETTE.threshold} strokeDasharray="4 4" />
+                          {(result?.trades ?? []).map((t, i) => (
+                            <g key={i}>
+                              <ReferenceDot x={t.entry_date} y={t.entry_price} r={4} fill={PALETTE.up} stroke="rgba(0,0,0,0.5)" />
+                              <ReferenceDot x={t.exit_date} y={t.exit_price} r={4} fill={PALETTE.down} stroke="rgba(0,0,0,0.5)" />
+                            </g>
                           ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                        </LineChart>
+                      )}
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="grid sm:grid-cols-4 gap-4 mt-5">
+                    <Stat label="Profit & Loss (USD)" value={fmtSignedMoney2(result.metrics.total_pnl)} />
+                    <Stat label="Win Rate" value={fmtPct1(result.metrics.win_rate)} />
+                    <Stat label="Annualized Return" value={fmtPct2(result.metrics.annualized_return)} />
+                    <Stat label="Trades" value={String((result.trades ?? []).length)} />
+                  </div>
+                  <div className="grid sm:grid-cols-4 gap-4 mt-4">
+                    <Stat label="Final Equity" value={fmtMoney2(result.metrics.final_equity)} />
+                    <Stat label="Max Drawdown" value={fmtPct2(result.metrics.max_drawdown)} />
+                    <Stat label="Average Trade Return" value={fmtPct2(avgTradeReturn)} />
+                    <Stat label="Initial Equity" value={fmtMoney2(result.metrics.initial_equity)} />
+                  </div>
+
+                  <div className="mt-3 text-xs text-[var(--muted)] italic">
+                    Equity starts at {fmtMoney2(result.metrics.initial_equity)} and steps up/down only on exit days (one position at a time).
+                  </div>
                 </div>
 
-                {/* Optimizer Insights */}
-                {result && (
-                  <OptimizerPanel
-                    result={result}
-                    trades={(tradesWithBars as any) as (Trade & { daysBars?: number })[]}
-                  />
-                )}
+                {/* Trades + Optimizer */}
+                <div className="flex flex-col h-full">
+                  <div className="card p-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-2xl font-bold tracking-tight text-[var(--accent)]">
+                        Trades ({tradesWithBars.length})
+                      </h3>
+                      <div className="flex gap-2 text-xs text-[var(--muted)]">
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border " +
+                            (tradeView === "cards" ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]" : "border-[var(--border)] text-[var(--text)]")
+                          }
+                          onClick={() => setTradeView("cards")}
+                        >
+                          Cards
+                        </button>
+                        <button
+                          className={
+                            "px-3 py-1 rounded-md border " +
+                            (tradeView === "table" ? "bg-[var(--accent)] text-[#0b0c10] border-[var(--accent)]" : "border-[var(--border)] text-[var(--text)]")
+                          }
+                          onClick={() => setTradeView("table")}
+                        >
+                          Table
+                        </button>
+                      </div>
+                    </div>
+
+                    {tradeView === "cards" ? (
+                      <div className="overflow-x-auto">
+                        <div className="grid auto-cols-[210px] grid-flow-col gap-4">
+                          {tradesWithBars.map((t, i) => {
+                            const positive = t.pnl >= 0;
+                            return (
+                              <div key={i} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4">
+                                <div className="text-sm font-semibold text-[var(--text)] mb-2">{t.entry_date}</div>
+                                <div className="text-sm text-[var(--text)]/80 space-y-1">
+                                  <Row k="Entry Px" v={t.entry_price.toFixed(2)} />
+                                  <Row k="Exit Px" v={t.exit_price.toFixed(2)} />
+                                  <Row k="PnL" v={`${positive ? "+" : ""}${t.pnl.toFixed(2)}`} tone={positive ? "win" : "loss"} />
+                                  <Row k="Return" v={`${(t.return_pct * 100).toFixed(2)}%`} tone={positive ? "win" : "loss"} />
+                                  <Row k="Bars" v={Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"} />
+                                  <div className="flex justify-end">
+                                    <span className={"px-2 py-0.5 rounded-full text-xs " + (positive ? "bg-[var(--up)]/15 text-up" : "bg-[var(--down)]/15 text-down")}>
+                                      {positive ? "Win" : "Loss"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="table text-sm w-full">
+                          <thead>
+                            <tr className="text-[var(--text)]">
+                              <Th onClick={() => toggleSort("entry_date")}>Date In {sortKey === "entry_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th onClick={() => toggleSort("exit_date")}>Date Out {sortKey === "exit_date" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th>Entry</Th><Th>Exit</Th>
+                              <Th onClick={() => toggleSort("pnl")}>PnL {sortKey === "pnl" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th onClick={() => toggleSort("return_pct")}>Return % {sortKey === "return_pct" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                              <Th onClick={() => toggleSort("daysBars")}>Bars {sortKey === "daysBars" ? (sortDir === "asc" ? "^" : "v") : ""}</Th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tradesWithBars.map((t, i) => (
+                              <tr key={i} className={t.pnl >= 0 ? "text-up" : "text-down"}>
+                                <td>{t.entry_date}</td><td>{t.exit_date}</td>
+                                <td>{t.entry_price.toFixed(2)}</td><td>{t.exit_price.toFixed(2)}</td>
+                                <td>{t.pnl.toFixed(2)}</td><td>{(t.return_pct * 100).toFixed(2)}%</td>
+                                <td>{Number.isFinite((t as any).daysBars) ? (t as any).daysBars : "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Optimizer Insights */}
+                  {result && (
+                    <OptimizerPanel
+                      result={result}
+                      trades={(tradesWithBars as any) as (Trade & { daysBars?: number })[]}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
 
-            <DrawdownChart equity={result.equity_curve} />
-          </>
-        )}
+              <DrawdownChart equity={result.equity_curve} />
+            </>
+          )}
 
-        <div className="text-center text-xs text-slate-500">
-          Created by <span className="font-semibold">Aryan Rawat</span>
+          <div className="text-center text-xs text-[var(--muted)]">
+            Created by <span className="font-semibold">Aryan Rawat</span>
+          </div>
         </div>
       </div>
     </div>
@@ -642,19 +693,19 @@ export default function App() {
 /* ========== Small UI bits ========== */
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="p-5 rounded-xl bg-slate-900/40 border border-slate-800">
-      <div className="text-sm text-slate-400">{label}</div>
-      <div className="text-2xl font-semibold tabular-nums whitespace-nowrap leading-snug">{value}</div>
-      {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+    <div className="p-5 rounded-xl bg-[var(--panel)] border border-[var(--border)]">
+      <div className="text-sm text-[var(--muted)]">{label}</div>
+      <div className="text-2xl font-semibold tabular-nums whitespace-nowrap leading-snug text-[var(--text)]">{value}</div>
+      {sub && <div className="text-xs text-[var(--muted)] mt-1">{sub}</div>}
     </div>
   );
 }
 function Row({ k, v, tone }: { k: string; v: any; tone?: "win" | "loss" }) {
-  const c = tone === "win" ? "text-emerald-300" : tone === "loss" ? "text-rose-300" : "text-slate-300";
+  const c = tone === "win" ? "text-up" : tone === "loss" ? "text-down" : "text-[var(--text)]/80";
   return <div className={`flex justify-between ${c}`}><span>{k}</span><span className="tabular-nums">{v}</span></div>;
 }
 function Th({ children, onClick }: { children: any; onClick?: () => void }) {
-  return <th className="cursor-pointer" onClick={onClick}>{children}</th>;
+  return <th className="cursor-pointer text-[var(--text)]/90" onClick={onClick}>{children}</th>;
 }
 
 /* ========== Optimizer Panel (vertical tiles + real suggestions) ========== */
@@ -718,7 +769,7 @@ function OptimizerPanel({
 
   return (
     <div className="card p-6 flex-1 flex flex-col">
-      <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-400 mb-3">
+      <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--accent)] mb-3">
         Optimizer Insights
       </h3>
 
@@ -734,9 +785,9 @@ function OptimizerPanel({
       </div>
 
       {/* Compact suggestions box */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-        <div className="text-[12px] font-semibold text-slate-300 mb-1.5">Suggestions</div>
-        <ul className="list-disc ml-5 text-[12px] leading-5 text-slate-300 space-y-1">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
+        <div className="text-[12px] font-semibold text-[var(--text)]/80 mb-1.5">Suggestions</div>
+        <ul className="list-disc ml-5 text-[12px] leading-5 text-[var(--text)]/80 space-y-1">
           {sugg.slice(0, 4).map((s, i) => (
             <li key={i}>{s}</li>
           ))}
@@ -759,9 +810,9 @@ function MetricRow({ label, value }: { label: string; value: string }) {
       : "text-xl sm:text-2xl";
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-2 h-14 flex items-center justify-between">
-      <div className="text-[11px] sm:text-xs text-slate-400 mr-3">{label}</div>
-      <div className={`${valueSize} font-semibold tabular-nums leading-none`}>
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 py-2 h-14 flex items-center justify-between">
+      <div className="text-[11px] sm:text-xs text-[var(--muted)] mr-3">{label}</div>
+      <div className={`${valueSize} font-semibold tabular-nums leading-none text-[var(--text)]`}>
         {s}
       </div>
     </div>
