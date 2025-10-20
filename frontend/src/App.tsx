@@ -245,6 +245,7 @@ const SECTIONS = [
   { id: "drawdown", label: "Drawdown" },
 ] as const;
 
+
 function useActiveSection() {
   const [active, setActive] = useState<string>("docs");
   const observer = useRef<IntersectionObserver | null>(null);
