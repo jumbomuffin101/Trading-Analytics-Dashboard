@@ -1,76 +1,84 @@
-🧩 1️⃣ Final README.md (with architecture diagram)
 # 📈 SSMIF Backtest Visualizer
 
-An interactive trading analytics dashboard built by **Aryan Rawat** for the Stevens Student Managed Investment Fund (SSMIF).  
-This app lets users analyze historical stock data, backtest trading strategies, and visualize performance metrics — all in one beautiful, lightweight web interface.
+An interactive **trading analytics dashboard** built by **Aryan Rawat** for the Stevens Student Managed Investment Fund (**SSMIF**).  
+It allows users to explore historical stock data, test trading strategies, and visualize performance metrics — all through a sleek, fast, and responsive web interface.
 
 ---
 
-## 🧠 System Architecture
+## 🧠 System Overview
 
 ```mermaid
 flowchart LR
-    A[User Browser<br/>(React + Tailwind + Recharts)] -->|API Calls /fetch, /peek, /backtest| B[Cloudflare Worker / Netlify Function<br/>(FastAPI Equivalent Logic)]
-    B -->|Fetch OHLC Data| C[(Yahoo Finance API<br/>+ Stooq Backup)]
-    B --> D[Computation Layer<br/>(Equity Curve, Metrics, Trades)]
-    D --> A
+    A[Frontend<br/>(React + Tailwind + Recharts)] -->|POST /peek, /backtest| B[Serverless Backend<br/>(Netlify Function / Cloudflare Worker)]
+    B -->|Fetch OHLC Data| C[(Yahoo Finance API + Stooq Backup)]
+    B --> D[Computation Layer<br/>(PnL, Equity Curve, Metrics, Trades)]
+    D --> A[Charts & Metrics Dashboard]
+Data Flow
+User Input – Choose a symbol, start/end dates, and strategy parameters.
 
+Frontend → Backend – Sends a JSON request to /peek or /backtest.
 
-Data Flow Summary:
+Backend – Fetches OHLC data from Yahoo Finance (with Stooq fallback) and computes:
 
-User interacts with the React UI and sets parameters (symbol, start, end, threshold, hold days).
+Equity curve
 
-Frontend sends JSON payload to the backend /peek or /backtest routes.
+Profit/Loss
 
-Backend fetches OHLC price data from Yahoo Finance or Stooq, then computes:
+Win Rate
 
-PnL, Equity Curve, Win Rate, Drawdown, etc.
+Annualized Return
 
-Backend returns normalized JSON results → rendered into charts using Recharts.
+Drawdown
+
+Response → UI – Normalized JSON feeds interactive charts and trade tables using Recharts.
 
 🚀 Features
+🔍 Peek Market Snapshot – Instantly view recent min/median/max closes and a suggested entry threshold.
 
-Peek Market Snapshot: Instantly view recent stock price ranges, medians, and thresholds.
+📊 Strategy Backtesting – Test breakout, SMA crossover, and mean-reversion strategies.
 
-Dynamic Strategy Backtesting: Simulate “cross-above-threshold” trading strategies.
+📈 Interactive Visualization – Smooth charts for equity, price, and drawdown performance.
 
-Real-time Visualization: Interactive charts for equity curves & trade markers.
+💡 Detailed Metrics – Profit Factor, Drawdown, Win Rate, Annualized Return, and more.
 
-Performance Metrics: Profit Factor, Drawdown, Win Rate, Annualized Return, etc.
-
-Responsive & Fast: Built with React + TypeScript + TailwindCSS + Vite.
+⚡ Fast & Responsive – Powered by React + TypeScript + Vite + TailwindCSS.
 
 🧱 Tech Stack
 Layer	Technology
-Frontend	React + TypeScript + Vite + TailwindCSS + Recharts
-Backend	Cloudflare Worker / Netlify Function (FastAPI-style logic)
-Data Source	Yahoo Finance + Stooq
-Deployment	Netlify (Frontend) + Cloudflare (API Worker)
-⚙️ Local Setup
-Clone the Repository
-git clone https://github.com/<your-username>/ssmif-quant-dev.git
-cd ssmif-quant-dev
+Frontend	React • TypeScript • Vite • TailwindCSS • Recharts
+Backend	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
+Data Source	Yahoo Finance API (+ Stooq backup)
+Deployment	Netlify (frontend) + Cloudflare Workers (API)
 
-Frontend Setup
+⚙️ Local Setup
+1️⃣ Clone the Repository
+bash
+Copy code
+git clone https://github.com/jumbomuffin101/ssmif-quant-dev.git
+cd ssmif-quant-dev
+2️⃣ Frontend Setup
+bash
+Copy code
 cd frontend
 npm install
 npm run dev
-
-
 Then open http://localhost:5173
 
-Backend (optional local test)
+3️⃣ Backend (optional local test)
+bash
+Copy code
 cd backend
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
+Check health:
 
-
-Test:
-
+arduino
+Copy code
 http://127.0.0.1:8000/status
-
-🌐 Deployment Notes
+🌐 Deployment
 ✅ Netlify (Frontend)
+toml
+Copy code
 [build]
   base = "frontend"
   command = "npm ci && npm run build"
@@ -81,38 +89,40 @@ http://127.0.0.1:8000/status
   to = "/.netlify/functions/:splat"
   status = 200
   force = true
-
-☁️ Cloudflare Worker (Backend)
-
+☁️ Cloudflare Worker (API)
 Deployed at:
-
 https://ssmif-api.<your-namespace>.workers.dev
 
+Test endpoint:
 
-Example test:
-
+bash
+Copy code
 curl https://ssmif-api.<your-namespace>.workers.dev/status
-
 📊 Example API Usage
 /peek
+bash
+Copy code
 curl -X POST -H "Content-Type: application/json" \
   -d '{"symbol":"SPY","start":"2025-05-01","end":"2025-08-29"}' \
   https://ssmif-api.<your-namespace>.workers.dev/peek
-
 /backtest
+bash
+Copy code
 curl -X POST -H "Content-Type: application/json" \
   -d '{"symbol":"AAPL","threshold":180.5,"hold_days":4,"start":"2025-06-01","end":"2025-09-30"}' \
   https://ssmif-api.<your-namespace>.workers.dev/backtest
-
 🧮 Key Metrics Explained
 Metric	Description
-PnL	Profit/Loss in USD
+PnL	Profit / Loss (USD)
 Win Rate	Percentage of profitable trades
-Annualized Return	CAGR based on total equity gain
-Max Drawdown	Largest equity drop from peak
+Annualized Return	CAGR based on equity growth
+Max Drawdown	Largest peak-to-trough equity drop
 Profit Factor	Total Profit ÷ Total Loss
-Average Hold Period	Mean number of bars held per trade
+Avg Hold Period	Mean bars held per trade
+
 🗂️ Project Structure
+pgsql
+Copy code
 ssmif-quant-dev/
 ├── frontend/
 │   ├── src/
@@ -127,36 +137,15 @@ ssmif-quant-dev/
 ├── netlify/
 │   └── functions/
 └── README.md
-
 🧩 API Endpoints
 Method	Endpoint	Description
 GET	/status	Health check
 POST	/peek	Fetch market snapshot
 POST	/backtest	Run threshold-based backtest
-🧠 Author
 
+👤 Author
 Aryan Rawat
 Stevens Institute of Technology — School of Systems & Enterprises
-
 Quantitative Finance • Software Systems • Applied AI
 
 GitHub: @JumboMuffin101
-
-🪙 License
-
-MIT License — Free for educational and research use.
-
-💬 Acknowledgements
-
-Recharts
- for charting
-
-TailwindCSS
- for UI
-
-FastAPI
- for backend structure
-
-Cloudflare Workers
- + Netlify
- for deployment
