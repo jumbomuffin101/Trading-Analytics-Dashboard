@@ -1,23 +1,28 @@
-# 📈 SSMIF Backtest Visualizer
+# 📈 SSMIF Quant Backtest Visualizer
 
-Deployed at: https://jumbomuffin101.github.io/ssmif-quant-dev/
+**Deployed at:** [https://jumbomuffin101.github.io/ssmif-quant-dev/](https://jumbomuffin101.github.io/ssmif-quant-dev/)
 
-An interactive **trading analytics dashboard** built by **Aryan Rawat** for the Stevens Student Managed Investment Fund (**SSMIF**).  
+An interactive **trading analytics dashboard** built by **Aryan Rawat** for the **Stevens Student Managed Investment Fund (SSMIF)**.  
 It allows users to explore historical stock data, test trading strategies, and visualize performance metrics — all through a sleek, fast, and responsive web interface.
 
+---
+
+## 🧠 System Architecture
+
+```mermaid
 flowchart LR
     A[Frontend<br/>(React + Tailwind + Recharts)] -->|POST /peek, /backtest| B[Serverless Backend<br/>(Netlify Function / Cloudflare Worker)]
-    B -->|Fetch OHLC Data| C[(Yahoo Finance API + Stooq Backup)]
+    B -->|Fetch OHLC Data| C[(Yahoo Finance API<br/>+ Stooq Backup)]
     B --> D[Computation Layer<br/>(PnL, Equity Curve, Metrics, Trades)]
     D --> A[Charts & Metrics Dashboard]
-Data Flow
+🔄 Data Flow
 User Input – Choose a symbol, start/end dates, and strategy parameters.
 
 Frontend → Backend – Sends a JSON request to /peek or /backtest.
 
-Backend – Fetches OHLC data from Yahoo Finance (with Stooq fallback) and computes:
+Backend – Fetches OHLC data (Yahoo Finance w/ Stooq fallback) and computes:
 
-Equity curve
+Equity Curve
 
 Profit/Loss
 
@@ -27,18 +32,18 @@ Annualized Return
 
 Drawdown
 
-Response → UI – Normalized JSON feeds interactive charts and trade tables using Recharts.
+Response → UI – Normalized JSON powers dynamic charts and trade tables.
 
 🚀 Features
 🔍 Peek Market Snapshot – Instantly view recent min/median/max closes and a suggested entry threshold.
 
 📊 Strategy Backtesting – Test breakout, SMA crossover, and mean-reversion strategies.
 
-📈 Interactive Visualization – Smooth charts for equity, price, and drawdown performance.
+📈 Interactive Visualization – Smooth equity, price, and drawdown charts with Recharts.
 
-💡 Detailed Metrics – Profit Factor, Drawdown, Win Rate, Annualized Return, and more.
+💡 Detailed Metrics – Profit Factor, Max Drawdown, Win Rate, Annualized Return, and more.
 
-⚡ Fast & Responsive – Powered by React + TypeScript + Vite + TailwindCSS.
+⚡ Fast & Responsive – Built with React + TypeScript + Vite + TailwindCSS.
 
 🧱 Tech Stack
 Layer	Technology
@@ -59,9 +64,9 @@ Copy code
 cd frontend
 npm install
 npm run dev
-Then open http://localhost:5173
+Then open: http://localhost:5173
 
-3️⃣ Backend (optional local test)
+3️⃣ Backend (Optional Local Test)
 bash
 Copy code
 cd backend
@@ -77,38 +82,37 @@ http://127.0.0.1:8000/status
 toml
 Copy code
 [build]
-  base = "frontend"
-  command = "npm ci && npm run build"
-  publish = "dist"
+base = "frontend"
+command = "npm ci && npm run build"
+publish = "dist"
 
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-  force = true
+from = "/api/*"
+to = "/.netlify/functions/:splat"
+status = 200
+force = true
 ☁️ Cloudflare Worker (API)
-Deployed at:
-https://ssmif-api.<your-namespace>.workers.dev
+Deployed at: https://ssmif-api..workers.dev
 
-Test endpoint:
+Test Endpoint:
 
 bash
 Copy code
-curl https://ssmif-api.<your-namespace>.workers.dev/status
+curl https://ssmif-api..workers.dev/status
 📊 Example API Usage
 /peek
 bash
 Copy code
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"symbol":"SPY","start":"2025-05-01","end":"2025-08-29"}' \
-  https://ssmif-api.<your-namespace>.workers.dev/peek
+-d '{"symbol":"SPY","start":"2025-05-01","end":"2025-08-29"}' \
+https://ssmif-api..workers.dev/peek
 /backtest
 bash
 Copy code
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"symbol":"AAPL","threshold":180.5,"hold_days":4,"start":"2025-06-01","end":"2025-09-30"}' \
-  https://ssmif-api.<your-namespace>.workers.dev/backtest
-🧮 Key Metrics Explained
+-d '{"symbol":"AAPL","threshold":180.5,"hold_days":4,"start":"2025-06-01","end":"2025-09-30"}' \
+https://ssmif-api..workers.dev/backtest
+🧮 Key Metrics
 Metric	Description
 PnL	Profit / Loss (USD)
 Win Rate	Percentage of profitable trades
@@ -142,7 +146,3 @@ POST	/backtest	Run threshold-based backtest
 
 👤 Author
 Aryan Rawat
-Stevens Institute of Technology — School of Systems & Enterprises
-Quantitative Finance • Software Systems • Applied AI
-
-GitHub: @JumboMuffin101
