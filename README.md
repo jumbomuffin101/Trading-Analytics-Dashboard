@@ -9,6 +9,7 @@ It allows users to explore historical stock data, test trading strategies, and v
 
 ## 🧠 System Architecture
 
+```mermaid
 flowchart LR
     A[Frontend<br/>(React + Tailwind + Recharts)] -->|POST /peek, /backtest| B[Serverless Backend<br/>(Netlify Function / Cloudflare Worker)]
     B -->|Fetch OHLC Data| C[(Yahoo Finance API<br/>+ Stooq Backup)]
