@@ -435,7 +435,7 @@ export default function App() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
 
-  // ==== NEW STRATEGY STATE (matches backend) ====
+  // ==== Strategy state (matches backend) ====
   const [strategy, setStrategy] = useState<StrategyKey>("breakout_pct");
 
   // Common knobs for non-legacy strategies
@@ -567,13 +567,53 @@ export default function App() {
       return {
         strategy,
         lookback: Math.max(5, Number(lookback) || 20),
-        drop_pct: Math.max(0.001, dropFraction),
+        drop_pct: Math.max(0.001, Math.min(0.2, dropFraction)), // clamp sane range
         max_hold_days: Math.max(1, Number(maxHoldDays) || 1),
         ...common,
       };
     }
     return undefined;
   };
+
+  // ===== Mean Reversion: quick local estimator to show "smaller drop% → more trades"
+  const mrEstimate = useMemo(() => {
+    if (strategy !== "mean_reversion") return null;
+
+    // pick a working series: prefer preview if present (faster), else result price series
+    const closes: number[] =
+      (peek?.preview?.map(p => Number(p.close)).filter(Number.isFinite)) ??
+      [];
+    const closesAlt: number[] =
+      (result?.price_series?.map(p => Number(p.close)).filter(Number.isFinite)) ??
+      [];
+
+    const series = closes.length ? closes : closesAlt;
+    if (series.length < 10) return null;
+
+    const lb = Math.max(5, Number(lookback) || 20);
+    const raw = revDropPct.trim();
+    const v = Number(raw);
+    const drop = !isFinite(v) ? 0.01 : (v >= 1 ? v/100 : v);
+    const allowL = allowLong;
+    const allowS = allowShort;
+
+    // sma helper
+    const sma = (arr: number[], i: number, w: number) => {
+      let sum = 0, c = 0;
+      for (let k = Math.max(0, i - w + 1); k <= i; k++) { sum += arr[k]; c++; }
+      return c ? sum / c : NaN;
+    };
+
+    let signals = 0;
+    for (let i = lb; i < series.length; i++) {
+      const m = sma(series, i, lb);
+      const c = series[i];
+      if (!isFinite(m) || !isFinite(c)) continue;
+      if (allowL && c <= m * (1 - drop)) signals++;
+      if (allowS && c >= m * (1 + drop)) signals++;
+    }
+    return Math.max(0, signals);
+  }, [strategy, peek, result, lookback, revDropPct, allowLong, allowShort]);
 
   const doBacktest = async () => {
     setError(null);
@@ -869,6 +909,17 @@ export default function App() {
                       <div className="mb-1 text-[var(--text)]/80">Max Hold Days</div>
                       <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={maxHoldDays} onChange={(e)=>setMaxHoldDays(e.target.value)} placeholder="e.g. 1" />
                     </label>
+
+                    {/* Inline estimator: confirms smaller drop% => more trades */}
+                    <div className="sm:col-span-2 text-xs text-[var(--muted)]">
+                      Est. signals in window:{" "}
+                      <span className="font-semibold text-[var(--text)]">
+                        {mrEstimate === null ? "—" : `~${mrEstimate}`}
+                      </span>{" "}
+                      <span className="text-[var(--muted)]/80">
+                        (smaller Drop % → more trades)
+                      </span>
+                    </div>
                   </>
                 )}
 
