@@ -1,5 +1,7 @@
 // cloudfare-api/src/index.ts
-// Returns payloads that match the frontend's original expectations exactly.
+// Returns payloads that match the frontend's original expectations exactly,
+// but adds three strategies with data-adaptive defaults so trade counts
+// naturally vary with symbol/date range volatility and trend.
 
 const PAGES_ORIGIN = "https://jumbomuffin101.github.io";
 
@@ -59,6 +61,8 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+
 /* -------------------- Robust candles (Stooq → Yahoo) --------------------- */
 
 async function fetchStooqCsv(host: "stooq.com" | "stooq.pl", symbolLower: string): Promise<string> {
@@ -100,7 +104,7 @@ async function tryStooqAll(symbol: string, start?: string, end?: string): Promis
       if (end) data = data.filter((d) => d.date <= end);
       if (data.length) return { data, source: `stooq:${v.host}/${v.sym}` };
     } catch {
-      // keep trying variants
+      // continue
     }
   }
   return { data: [] };
@@ -151,12 +155,15 @@ async function tryYahoo(symbol: string, start?: string, end?: string, host = "qu
 }
 
 async function fetchCandles(symbol: string, start?: string, end?: string): Promise<{ data: OHLC[]; source?: string }> {
+  // 1) Stooq (serverless friendly)
   let r = await tryStooqAll(symbol, start, end);
   if (r.data.length) return r;
 
+  // 2) Yahoo primary
   r = await tryYahoo(symbol, start, end, "query1.finance.yahoo.com");
   if (r.data.length) return r;
 
+  // 3) Yahoo mirror
   r = await tryYahoo(symbol, start, end, "query2.finance.yahoo.com");
   return r;
 }
@@ -190,6 +197,7 @@ async function handlePeek(body: any) {
   const min_close = clampNum(Math.min(...closes));
   const max_close = clampNum(Math.max(...closes));
   const median_close = clampNum(median(closes));
+  // Simple suggested threshold between median and max
   const suggested_threshold = clampNum(median_close + (max_close - median_close) * 0.25, 2);
 
   return {
@@ -206,24 +214,7 @@ async function handlePeek(body: any) {
   };
 }
 
-/* ------------------------------ /backtest ------------------------------- */
-/* Legacy behavior: absolute threshold cross from below, fixed hold days.
-   Optional new params (for more trades) via body.params:
-   {
-     mode: "percent_breakout" | "atr_breakout",
-     lookback: number,                 // e.g., 20
-     threshold_pct?: number,           // e.g., 0.003  (percent mode)
-     atr_k?: number,                   // e.g., 0.5    (ATR mode)
-     max_hold_days: number,            // e.g., 5–10 for more turnover
-     take_profit_pct?: number,         // e.g., 0.02
-     stop_loss_pct?: number,           // e.g., 0.01
-     allow_long: boolean,              // true
-     allow_short: boolean,             // true => more trades
-     cooldown_days: number,            // 0–2
-     allow_immediate_reentry: boolean, // true
-   }
-   Output shape (trades/equity_curve/metrics) remains identical.
-*/
+/* ------------------------------ Strategy core ---------------------------- */
 
 type Trade = {
   entry_date: string;
@@ -234,24 +225,41 @@ type Trade = {
   return_pct: number;   // fraction
 };
 
-/* ---------- “More trades” engine (percent/ATR breakout, optional short) ---------- */
+type Metrics = {
+  total_pnl: number; win_rate: number; annualized_return: number;
+  max_drawdown: number; final_equity: number; initial_equity: number;
+};
 
-type BacktestParams = {
-  mode: "percent_breakout" | "atr_breakout";
-  lookback: number;
-  threshold_pct?: number;
-  atr_k?: number;
-  max_hold_days: number;
+type StrategyName = "legacy_absolute" | "breakout_pct" | "breakout_atr" | "mean_reversion";
+
+type CommonParams = {
+  allow_long?: boolean;
+  allow_short?: boolean;
   take_profit_pct?: number;
   stop_loss_pct?: number;
-  allow_long: boolean;
-  allow_short: boolean;
-  cooldown_days: number;
-  allow_immediate_reentry: boolean;
+  max_hold_days?: number;
+  cooldown_days?: number;
+  allow_immediate_reentry?: boolean;
+};
+
+type BreakoutPctParams = CommonParams & {
+  lookback?: number;
+  threshold_pct?: number; // e.g. 0.003 => 0.3%
+};
+
+type BreakoutAtrParams = CommonParams & {
+  lookback?: number;
+  atr_k?: number; // multiplier on ATR
+};
+
+type MeanRevParams = CommonParams & {
+  lookback?: number;   // SMA window
+  drop_pct?: number;   // distance from SMA to trigger
 };
 
 function rmax(a: number[], w: number, i: number){const s=Math.max(0,i-w);let m=-Infinity;for(let k=s;k<i;k++)m=Math.max(m,a[k]);return m;}
 function rmin(a: number[], w: number, i: number){const s=Math.max(0,i-w);let m=Infinity;for(let k=s;k<i;k++)m=Math.min(m,a[k]);return m;}
+function sma(a: number[], w: number, i: number){const s=Math.max(0,i-w+1);let sum=0, n=0;for(let k=s;k<=i;k++){sum+=a[k];n++;}return n?sum/n:NaN;}
 function atrWilder(b: OHLC[], p=14){
   const tr:number[]=[];
   for (let i=0;i<b.length;i++){
@@ -267,27 +275,87 @@ function atrWilder(b: OHLC[], p=14){
   return atr;
 }
 
-function runBacktestMoreTrades(data: OHLC[], pp: Partial<BacktestParams>): { trades: Trade[] } {
-  const p: BacktestParams = {
-    mode: pp.mode ?? "percent_breakout",
-    lookback: Math.max(5, Math.min(200, pp.lookback ?? 20)),
-    threshold_pct: pp.threshold_pct ?? 0.003, // 0.3%
-    atr_k: pp.atr_k ?? 0.5,
-    max_hold_days: Math.max(1, pp.max_hold_days ?? 5),
-    take_profit_pct: pp.take_profit_pct ?? 0.02,
-    stop_loss_pct: pp.stop_loss_pct ?? 0.01,
-    allow_long: pp.allow_long ?? true,
-    allow_short: pp.allow_short ?? true,
-    cooldown_days: Math.max(0, pp.cooldown_days ?? 0),
-    allow_immediate_reentry: pp.allow_immediate_reentry ?? true,
+// Build equity/metrics so UI stays identical across strategies
+function buildMetrics(trades: Trade[], data: OHLC[], initialEquity=1000){
+  let equity = initialEquity;
+  const equity_curve = [{ date: data[0]?.date ?? "", equity: clampNum(equity) }];
+  for (const t of trades) {
+    equity = +(equity * (1 + t.return_pct)).toFixed(2);
+    equity_curve.push({ date: t.exit_date, equity });
+  }
+  const total_pnl = clampNum(equity - initialEquity);
+  const wins = trades.filter(t => t.pnl > 0).length;
+  const win_rate = trades.length ? wins / trades.length : 0;
+  let annualized_return = 0;
+  if (data.length > 1){
+    const days = (new Date(data[data.length-1].date).getTime() - new Date(data[0].date).getTime())/(1000*60*60*24);
+    const years = days/365;
+    if (years > 0) annualized_return = Math.pow(equity/initialEquity, 1/years) - 1;
+  }
+  let peak = equity_curve[0]?.equity ?? 0, mdd = 0;
+  for (const p of equity_curve){
+    if (p.equity > peak) peak = p.equity;
+    const dd = peak ? (p.equity - peak) / peak : 0;
+    if (dd < mdd) mdd = dd;
+  }
+  const metrics: Metrics = {
+    total_pnl: clampNum(total_pnl),
+    win_rate: +win_rate.toFixed(6),
+    annualized_return: +annualized_return.toFixed(6),
+    max_drawdown: +Math.abs(mdd).toFixed(6),
+    final_equity: clampNum(equity),
+    initial_equity: clampNum(initialEquity),
   };
+  return { equity_curve, metrics };
+}
 
+/* ---------------------------- Strategies (3) ----------------------------- */
+
+// 1) Legacy absolute-threshold cross from below (your original)
+function runLegacyAbsolute(data: OHLC[], threshold: number, holdDays: number): Trade[] {
+  const trades: Trade[] = [];
   const closes = data.map(d => d.close);
-  const atr = p.mode === "atr_breakout" ? atrWilder(data, Math.max(10, Math.min(50, p.lookback))) : [];
+  for (let i=1;i<data.length - holdDays;i++){
+    const crossed = closes[i-1] < threshold && closes[i] >= threshold;
+    if (crossed){
+      const entry = data[i], exit = data[i+holdDays];
+      const pnl = +(exit.close - entry.close);
+      const ret = pnl / entry.close;
+      trades.push({
+        entry_date: entry.date,
+        entry_price: clampNum(entry.close),
+        exit_date: exit.date,
+        exit_price: clampNum(exit.close),
+        pnl: clampNum(pnl),
+        return_pct: +ret.toFixed(6),
+      });
+    }
+  }
+  return trades;
+}
+
+// 2) Breakout (percent or ATR). Adaptive defaults from data volatility.
+function runBreakoutPct(data: OHLC[], raw: BreakoutPctParams): Trade[] {
+  const trades: Trade[] = [];
+  const closes = data.map(d => d.close);
+  const lookback = Math.max(5, Math.min(200, raw.lookback ?? 20));
+
+  // Data-adaptive: estimate daily volatility ~ avg(|ret|)
+  const rets = [];
+  for (let i=1;i<closes.length;i++) rets.push(Math.abs((closes[i]-closes[i-1])/closes[i-1]));
+  const volPct = Math.max(0.001, Math.min(0.05, mean(rets))); // clamp 0.1%–5%
+  const threshold_pct = Math.max(0.001, Math.min(0.02, raw.threshold_pct ?? (0.6 * volPct))); // 0.6×vol
+
+  const allow_long  = raw.allow_long  ?? true;
+  const allow_short = raw.allow_short ?? true;
+  const max_hold_days = Math.max(1, raw.max_hold_days ?? 5);
+  const take_profit_pct = raw.take_profit_pct ?? 0.02;
+  const stop_loss_pct   = raw.stop_loss_pct   ?? 0.01;
+  const cooldown_days = Math.max(0, raw.cooldown_days ?? 0);
+  const allow_immediate_reentry = raw.allow_immediate_reentry ?? true;
 
   let pos: null | { side:"long"|"short"; entryIdx:number; entryPx:number } = null;
   let lastExit = -9999;
-  const trades: Trade[] = [];
 
   for (let i=1;i<data.length;i++){
     const c = closes[i];
@@ -296,11 +364,10 @@ function runBacktestMoreTrades(data: OHLC[], pp: Partial<BacktestParams>): { tra
     if (pos){
       const held = i - pos.entryIdx;
       const ret = (c - pos.entryPx) / pos.entryPx * (pos.side==="long"?1:-1);
-      let exit=false;
-      if (p.max_hold_days && held >= p.max_hold_days) exit = true;
-      if (!exit && p.take_profit_pct && ret >= p.take_profit_pct) exit = true;
-      if (!exit && p.stop_loss_pct && ret <= -p.stop_loss_pct) exit = true;
-
+      let exit = false;
+      if (held >= max_hold_days) exit = true;
+      if (!exit && take_profit_pct && ret >= take_profit_pct) exit = true;
+      if (!exit && stop_loss_pct   && ret <= -stop_loss_pct)   exit = true;
       if (exit){
         trades.push({
           entry_date: data[pos.entryIdx].date,
@@ -315,112 +382,170 @@ function runBacktestMoreTrades(data: OHLC[], pp: Partial<BacktestParams>): { tra
       }
     }
 
-    // entries
-    const canEnter = !pos && (p.allow_immediate_reentry || i > lastExit) && (p.cooldown_days===0 || i - lastExit > p.cooldown_days);
+    const canEnter = !pos && (allow_immediate_reentry || i > lastExit) && (cooldown_days===0 || i - lastExit > cooldown_days);
     if (!canEnter) continue;
 
-    let goL=false, goS=false;
-    if (p.mode === "percent_breakout"){
-      const up=rmax(closes,p.lookback,i), dn=rmin(closes,p.lookback,i);
-      const eps=p.threshold_pct!;
-      if (p.allow_long  && isFinite(up) && c > up*(1+eps)) goL=true;
-      if (p.allow_short && isFinite(dn) && c < dn*(1-eps)) goS=true;
-    } else {
-      const up=rmax(closes,p.lookback,i), dn=rmin(closes,p.lookback,i);
-      const k=p.atr_k!, a=atr[i];
-      if (isFinite(a)){
-        if (p.allow_long  && isFinite(up) && c > up + k*a) goL=true;
-        if (p.allow_short && isFinite(dn) && c < dn - k*a) goS=true;
+    const up = rmax(closes, lookback, i);
+    const dn = rmin(closes, lookback, i);
+    let goL = false, goS = false;
+    if (allow_long  && isFinite(up) && c > up * (1 + threshold_pct)) goL = true;
+    if (allow_short && isFinite(dn) && c < dn * (1 - threshold_pct)) goS = true;
+
+    if (goL) pos = { side:"long", entryIdx:i, entryPx:c };
+    else if (goS) pos = { side:"short", entryIdx:i, entryPx:c };
+  }
+
+  return trades;
+}
+
+function runBreakoutAtr(data: OHLC[], raw: BreakoutAtrParams): Trade[] {
+  const trades: Trade[] = [];
+  const closes = data.map(d => d.close);
+  const lookback = Math.max(10, Math.min(100, raw.lookback ?? 20));
+  const atr = atrWilder(data, lookback);
+
+  // Adaptive ATR multiple: scale slightly with realized vol so calmer markets still trigger
+  const avgAtr = mean(atr.filter(Number.isFinite));
+  const avgPx  = mean(closes);
+  const baseK  = 0.5;
+  const volAdj = avgPx > 0 ? Math.max(0.3, Math.min(0.8, (avgAtr/avgPx) / 0.01)) : 1; // normalize to ~1% ATR
+  const atr_k = raw.atr_k ?? +(baseK * volAdj).toFixed(2);
+
+  const allow_long  = raw.allow_long  ?? true;
+  const allow_short = raw.allow_short ?? true;
+  const max_hold_days = Math.max(1, raw.max_hold_days ?? 5);
+  const take_profit_pct = raw.take_profit_pct ?? 0.02;
+  const stop_loss_pct   = raw.stop_loss_pct   ?? 0.01;
+  const cooldown_days = Math.max(0, raw.cooldown_days ?? 0);
+  const allow_immediate_reentry = raw.allow_immediate_reentry ?? true;
+
+  let pos: null | { side:"long"|"short"; entryIdx:number; entryPx:number } = null;
+  let lastExit = -9999;
+
+  for (let i=1;i<data.length;i++){
+    const c = closes[i];
+
+    if (pos){
+      const held = i - pos.entryIdx;
+      const ret = (c - pos.entryPx) / pos.entryPx * (pos.side==="long"?1:-1);
+      let exit=false;
+      if (held >= max_hold_days) exit = true;
+      if (!exit && take_profit_pct && ret >= take_profit_pct) exit = true;
+      if (!exit && stop_loss_pct   && ret <= -stop_loss_pct)   exit = true;
+      if (exit){
+        trades.push({
+          entry_date: data[pos.entryIdx].date, entry_price: clampNum(pos.entryPx),
+          exit_date: data[i].date, exit_price: clampNum(c),
+          pnl: clampNum((c - pos.entryPx) * (pos.side==="long"?1:-1)),
+          return_pct: +ret.toFixed(6),
+        });
+        pos = null; lastExit = i;
       }
+    }
+
+    const canEnter = !pos && (allow_immediate_reentry || i > lastExit) && (cooldown_days===0 || i - lastExit > cooldown_days);
+    if (!canEnter) continue;
+
+    const up = rmax(closes, lookback, i);
+    const dn = rmin(closes, lookback, i);
+    const a  = atr[i];
+
+    let goL=false, goS=false;
+    if (isFinite(a)){
+      if (allow_long  && isFinite(up) && c > up + atr_k * a) goL = true;
+      if (allow_short && isFinite(dn) && c < dn - atr_k * a) goS = true;
     }
 
     if (goL) pos = { side:"long", entryIdx:i, entryPx:c };
     else if (goS) pos = { side:"short", entryIdx:i, entryPx:c };
   }
 
-  return { trades };
+  return trades;
 }
 
-/* ----------------------- Legacy (absolute threshold) --------------------- */
+// 3) Mean Reversion: enter after a drop below SMA by drop_pct; exit on mean touch or 1-day hold.
+// Defaults are intentionally turnover-friendly (drop_pct small, hold 1).
+function runMeanReversion(data: OHLC[], raw: MeanRevParams): Trade[] {
+  const trades: Trade[] = [];
+  const closes = data.map(d => d.close);
+  const lookback = Math.max(5, Math.min(100, raw.lookback ?? 20));
 
-function computeBacktestLegacy(
+  // Adaptive drop %: 0.5–2% typical depending on realized vol
+  const rets = [];
+  for (let i=1;i<closes.length;i++) rets.push(Math.abs((closes[i]-closes[i-1])/closes[i-1]));
+  const volPct = Math.max(0.001, Math.min(0.05, mean(rets)));
+  const drop_pct = Math.max(0.003, Math.min(0.025, raw.drop_pct ?? (0.8 * volPct))); // 0.8×vol
+
+  const allow_long  = raw.allow_long  ?? true;
+  const allow_short = raw.allow_short ?? true;
+  const max_hold_days = Math.max(1, raw.max_hold_days ?? 1); // <- default 1 day as requested
+  const take_profit_pct = raw.take_profit_pct ?? 0;  // TP/SL optional for MR; mean touch is primary exit
+  const stop_loss_pct   = raw.stop_loss_pct   ?? 0;
+  const cooldown_days = Math.max(0, raw.cooldown_days ?? 0);
+  const allow_immediate_reentry = raw.allow_immediate_reentry ?? true;
+
+  let pos: null | { side:"long"|"short"; entryIdx:number; entryPx:number } = null;
+  let lastExit = -9999;
+
+  for (let i=lookback;i<data.length;i++){
+    const c = closes[i];
+    const m = sma(closes, lookback, i);
+
+    // exits
+    if (pos){
+      const held = i - pos.entryIdx;
+      const ret = (c - pos.entryPx) / pos.entryPx * (pos.side==="long"?1:-1);
+      let exit = false;
+
+      // mean-touch exit: long exits when price >= SMA; short exits when price <= SMA
+      if (pos.side === "long"  && c >= m) exit = true;
+      if (pos.side === "short" && c <= m) exit = true;
+
+      if (!exit && max_hold_days && held >= max_hold_days) exit = true;
+      if (!exit && take_profit_pct && ret >= take_profit_pct) exit = true;
+      if (!exit && stop_loss_pct   && ret <= -stop_loss_pct)   exit = true;
+
+      if (exit){
+        trades.push({
+          entry_date: data[pos.entryIdx].date,
+          entry_price: clampNum(pos.entryPx),
+          exit_date: data[i].date,
+          exit_price: clampNum(c),
+          pnl: clampNum((c - pos.entryPx) * (pos.side==="long"?1:-1)),
+          return_pct: +ret.toFixed(6),
+        });
+        pos = null; lastExit = i;
+      }
+    }
+
+    const canEnter = !pos && (allow_immediate_reentry || i > lastExit) && (cooldown_days===0 || i - lastExit > cooldown_days);
+    if (!canEnter || !isFinite(m)) continue;
+
+    let goL=false, goS=false;
+    if (allow_long  && c <= m * (1 - drop_pct)) goL = true;           // dip below SMA by drop_pct
+    if (allow_short && c >= m * (1 + drop_pct)) goS = true;           // rip above SMA by drop_pct
+
+    if (goL) pos = { side:"long", entryIdx:i, entryPx:c };
+    else if (goS) pos = { side:"short", entryIdx:i, entryPx:c };
+  }
+
+  return trades;
+}
+
+/* ----------------------- Legacy wrapper (unchanged) ---------------------- */
+
+function computeBacktestLegacyForResponse(
   data: OHLC[],
   threshold: number,
   holdDays: number,
   initialEquity = 1000
 ) {
-  const trades: Trade[] = [];
-  const closes = data.map((d) => d.close);
-
-  for (let i = 1; i < data.length - holdDays; i++) {
-    const crossed = closes[i - 1] < threshold && closes[i] >= threshold;
-    if (crossed) {
-      const entry = data[i];
-      const exit = data[i + holdDays];
-      const pnl = +(exit.close - entry.close);
-      const ret = pnl / entry.close; // fraction
-      trades.push({
-        entry_date: entry.date,
-        entry_price: clampNum(entry.close),
-        exit_date: exit.date,
-        exit_price: clampNum(exit.close),
-        pnl: clampNum(pnl),
-        return_pct: +ret.toFixed(6),
-      });
-    }
-  }
-
-  // equity updates on exits
-  let equity = initialEquity;
-  const equity_curve = [{ date: data[0]?.date ?? "", equity: clampNum(equity) }];
-  for (const t of trades) {
-    equity = +(equity * (1 + t.return_pct)).toFixed(2);
-    equity_curve.push({ date: t.exit_date, equity });
-  }
-
-  // metrics
-  const total_pnl = clampNum(equity - initialEquity);
-  const wins = trades.filter((t) => t.pnl > 0).length;
-  const win_rate = trades.length ? wins / trades.length : 0;
-
-  // annualized
-  let annualized_return = 0;
-  if (data.length) {
-    const days =
-      (new Date(data[data.length - 1].date).getTime() -
-        new Date(data[0].date).getTime()) /
-      (1000 * 60 * 60 * 24);
-    const years = days / 365;
-    if (years > 0 && initialEquity > 0) {
-      annualized_return = Math.pow(equity / initialEquity, 1 / years) - 1;
-    }
-  }
-
-  // max drawdown
-  let peak = equity_curve.length ? equity_curve[0].equity : 0;
-  let mdd = 0;
-  for (const p of equity_curve) {
-    if (p.equity > peak) peak = p.equity;
-    const dd = peak ? (p.equity - peak) / peak : 0;
-    if (dd < mdd) mdd = dd;
-  }
-  const max_drawdown = Math.abs(mdd);
-
-  return {
-    trades,
-    equity_curve,
-    metrics: {
-      total_pnl: clampNum(total_pnl),
-      win_rate: +win_rate.toFixed(6),
-      annualized_return: +annualized_return.toFixed(6),
-      max_drawdown: +max_drawdown.toFixed(6),
-      final_equity: clampNum(equity),
-      initial_equity: clampNum(initialEquity),
-    },
-  };
+  const trades = runLegacyAbsolute(data, threshold, holdDays);
+  const { equity_curve, metrics } = buildMetrics(trades, data, initialEquity);
+  return { trades, equity_curve, metrics };
 }
 
-/* ------------------------- Backtest handler (both) ----------------------- */
+/* ------------------------- Backtest handler (all) ------------------------ */
 
 async function handleBacktest(body: any) {
   const symbol = (body?.symbol || "SPY").toString().toUpperCase();
@@ -431,8 +556,12 @@ async function handleBacktest(body: any) {
   const threshold = Number(body?.threshold);
   const hold_days = Math.max(1, Number(body?.hold_days ?? 4));
 
-  // optional new params (won't break legacy UI)
-  const params = (body?.params ?? {}) as Partial<BacktestParams>;
+  // new param block
+  const params = (body?.params ?? {}) as {
+    strategy?: StrategyName;
+    // strategy-specific fields get forwarded as-is
+    [k: string]: any;
+  };
 
   const { data, source: source_used } = await fetchCandles(symbol, start, end);
 
@@ -458,59 +587,24 @@ async function handleBacktest(body: any) {
     };
   }
 
-  // If a params object is provided, use the “more trades” engine.
-  // Otherwise, keep legacy absolute-threshold behavior.
+  // Choose strategy. If none provided, keep legacy to avoid breaking UI.
+  const strategy: StrategyName = (params.strategy as StrategyName) ?? "legacy_absolute";
+
   let trades: Trade[] = [];
-  let equity_curve: { date: string; equity: number }[] = [];
-  let metrics: {
-    total_pnl: number; win_rate: number; annualized_return: number;
-    max_drawdown: number; final_equity: number; initial_equity: number;
-  };
-
-  if (Object.keys(params).length > 0) {
-    const { trades: mtTrades } = runBacktestMoreTrades(data, params);
-
-    // Build equity/metrics identically to legacy so the UI stays happy
-    let equity = 1000;
-    equity_curve = [{ date: data[0].date, equity: clampNum(equity) }];
-    for (const t of mtTrades) {
-      equity = +(equity * (1 + t.return_pct)).toFixed(2);
-      equity_curve.push({ date: t.exit_date, equity });
-    }
-    const total_pnl = clampNum(equity - 1000);
-    const wins = mtTrades.filter((t) => t.pnl > 0).length;
-    const win_rate = mtTrades.length ? wins / mtTrades.length : 0;
-    // annualized
-    let annualized_return = 0;
-    const days =
-      (new Date(data[data.length - 1].date).getTime() -
-        new Date(data[0].date).getTime()) / (1000 * 60 * 60 * 24);
-    const years = days / 365;
-    if (years > 0) annualized_return = Math.pow(equity / 1000, 1 / years) - 1;
-
-    // max drawdown
-    let peak = equity_curve[0]?.equity ?? 0, mdd = 0;
-    for (const p of equity_curve) {
-      if (p.equity > peak) peak = p.equity;
-      const dd = peak ? (p.equity - peak) / peak : 0;
-      if (dd < mdd) mdd = dd;
-    }
-    metrics = {
-      total_pnl: clampNum(total_pnl),
-      win_rate: +win_rate.toFixed(6),
-      annualized_return: +annualized_return.toFixed(6),
-      max_drawdown: +Math.abs(mdd).toFixed(6),
-      final_equity: clampNum(equity),
-      initial_equity: 1000,
-    } as any;
-
-    trades = mtTrades;
+  if (strategy === "legacy_absolute") {
+    trades = runLegacyAbsolute(data, threshold, hold_days);
+  } else if (strategy === "breakout_pct") {
+    trades = runBreakoutPct(data, params as BreakoutPctParams);
+  } else if (strategy === "breakout_atr") {
+    trades = runBreakoutAtr(data, params as BreakoutAtrParams);
+  } else if (strategy === "mean_reversion") {
+    trades = runMeanReversion(data, params as MeanRevParams);
   } else {
-    const bt = computeBacktestLegacy(data, threshold, hold_days, 1000);
-    trades = bt.trades;
-    equity_curve = bt.equity_curve;
-    metrics = bt.metrics;
+    // fallback to legacy if unknown tag
+    trades = runLegacyAbsolute(data, threshold, hold_days);
   }
+
+  const { equity_curve, metrics } = buildMetrics(trades, data, 1000);
 
   return {
     symbol,
@@ -520,6 +614,7 @@ async function handleBacktest(body: any) {
     metrics,
     trades,
     equity_curve,
+    // optional price series for your price chart
     price_series: data.map((d) => ({ date: d.date, close: clampNum(d.close) })),
     source_used,
   };
@@ -527,7 +622,7 @@ async function handleBacktest(body: any) {
 
 /* ------------------------------- Worker ---------------------------------- */
 
-const BUILD = "v-fallback-stooq-yahoo-2"; // bump to verify deploy
+const BUILD = "v-strategies-adaptive-3"; // bump to verify deploy
 function about(origin: string) {
   return json({ ok: true, build: BUILD, service: "ssmif-api" }, 200, origin);
 }

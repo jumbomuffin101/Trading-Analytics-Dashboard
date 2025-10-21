@@ -101,7 +101,7 @@ function normalizeBacktest(raw: any, req: any) {
   return {
     symbol: String(raw?.symbol ?? ""),
     start, end,
-    params: { threshold, hold_days },
+    params: { threshold, hold_days, ...(raw?.params ?? {}) },
     metrics: {
       total_pnl,
       win_rate,
@@ -146,7 +146,7 @@ type Trade = {
 
 type BacktestResponse = {
   symbol: string; start: string; end: string;
-  params: { threshold: number; hold_days: number };
+  params: { threshold?: number; hold_days?: number } & Record<string, any>;
   metrics: {
     total_pnl: number; win_rate: number; annualized_return: number;
     max_drawdown: number; final_equity: number; initial_equity: number
@@ -157,7 +157,7 @@ type BacktestResponse = {
   note?: string;
 };
 
-type StrategyKey = "breakout" | "sma_cross" | "mean_rev";
+type StrategyKey = "legacy_absolute" | "breakout_pct" | "breakout_atr" | "mean_reversion";
 const PRESETS = ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","SPY","QQQ","NFLX"];
 
 /* ========= Fallback symbols ========= */
@@ -435,9 +435,24 @@ export default function App() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [tradeView, setTradeView] = useState<"cards" | "table">("cards");
 
-  const [strategy, setStrategy] = useState<StrategyKey>("breakout");
-  const [fast, setFast] = useState("10");
-  const [slow, setSlow] = useState("30");
+  // ==== NEW STRATEGY STATE (matches backend) ====
+  const [strategy, setStrategy] = useState<StrategyKey>("breakout_pct");
+
+  // Common knobs for non-legacy strategies
+  const [lookback, setLookback] = useState("20");
+  const [maxHoldDays, setMaxHoldDays] = useState("5");
+  const [takeProfitPct, setTakeProfitPct] = useState("0.02");
+  const [stopLossPct, setStopLossPct] = useState("0.01");
+  const [cooldownDays, setCooldownDays] = useState("0");
+  const [allowLong, setAllowLong] = useState(true);
+  const [allowShort, setAllowShort] = useState(true);
+  const [allowImmediateReentry, setAllowImmediateReentry] = useState(true);
+
+  // Breakout specific
+  const [thresholdPct, setThresholdPct] = useState("0.003"); // 0.3% default
+  const [atrK, setAtrK] = useState("0.5");
+
+  // Mean reversion specific (human %; convert later)
   const [revDropPct, setRevDropPct] = useState("2.0");
 
   const onStartChange = (v: string) => {
@@ -510,6 +525,56 @@ export default function App() {
     }
   }, [symbol, start, end, canPeek, peekBusy]);
 
+  // ===== Build params for the new backend strategies =====
+  const buildStrategyParams = () => {
+    if (strategy === "legacy_absolute") return undefined;
+
+    const common = {
+      allow_long: allowLong,
+      allow_short: allowShort,
+      take_profit_pct: Number(takeProfitPct) || 0,
+      stop_loss_pct: Number(stopLossPct) || 0,
+      cooldown_days: Math.max(0, parseInt(cooldownDays || "0", 10)),
+      allow_immediate_reentry: allowImmediateReentry,
+    };
+
+    if (strategy === "breakout_pct") {
+      return {
+        strategy,
+        lookback: Math.max(5, Number(lookback) || 20),
+        threshold_pct: Number(thresholdPct) || undefined, // fractional input (0.003 = 0.3%)
+        max_hold_days: Math.max(1, Number(maxHoldDays) || 5),
+        ...common,
+      };
+    }
+    if (strategy === "breakout_atr") {
+      return {
+        strategy,
+        lookback: Math.max(10, Number(lookback) || 20),
+        atr_k: Number(atrK) || undefined,
+        max_hold_days: Math.max(1, Number(maxHoldDays) || 5),
+        ...common,
+      };
+    }
+    if (strategy === "mean_reversion") {
+      const dropFraction = (() => {
+        const raw = revDropPct.trim();
+        if (!raw) return 0.01;
+        const v = Number(raw);
+        if (!isFinite(v)) return 0.01;
+        return v >= 1 ? v / 100 : v; // human % -> fraction
+      })();
+      return {
+        strategy,
+        lookback: Math.max(5, Number(lookback) || 20),
+        drop_pct: Math.max(0.001, dropFraction),
+        max_hold_days: Math.max(1, Number(maxHoldDays) || 1),
+        ...common,
+      };
+    }
+    return undefined;
+  };
+
   const doBacktest = async () => {
     setError(null);
     setLoading(true);
@@ -518,21 +583,19 @@ export default function App() {
       const thr = parseThreshold();
       const hd = parseHoldDays();
 
-      if (strategy === "breakout") {
+      if (strategy === "legacy_absolute") {
         if (thr === null) throw new Error("Please enter a valid numeric threshold (try Peek).");
         if (hd === null) throw new Error("Hold Days must be a whole number >= 1.");
       }
 
+      const params = buildStrategyParams();
+
       const payload: any = {
         symbol, start, end,
-        threshold: thr, hold_days: hd,
-        strategy,
-        params:
-          strategy === "breakout"
-            ? { threshold: thr, hold_days: hd }
-            : strategy === "sma_cross"
-            ? { fast: Number(fast), slow: Number(slow) }
-            : { drop_pct: Number(revDropPct), hold_days: hd },
+        ...(strategy === "legacy_absolute"
+          ? { threshold: thr, hold_days: hd }
+          : {}),
+        ...(params ? { params } : {}),
       };
 
       const res = await api.post<BacktestResponse>("/backtest", payload);
@@ -608,7 +671,7 @@ export default function App() {
             <ul className="mt-3 text-sm text-[var(--text)]/80 leading-6 list-disc pl-5 space-y-1">
               <li><strong>Pick a symbol & dates:</strong> use presets or type your own; dates are auto-corrected so Start ≤ End.</li>
               <li><strong>Peek:</strong> fetches a quick snapshot with min/median/max closes and a <em>suggested threshold</em>.</li>
-              <li><strong>Choose a strategy:</strong> Breakout (threshold + hold days), SMA Crossover (fast/slow), or Mean Reversion (drop% + hold).</li>
+              <li><strong>Choose a strategy:</strong> Absolute (legacy), Breakout (percent or ATR), or Mean Reversion (SMA).</li>
               <li><strong>Run Backtest:</strong> equity curve is cash-only and steps on exit days; price chart shows entries/exits.</li>
               <li><strong>Read the tiles:</strong> good values appear <span className="text-up font-medium">green</span>; unfavorable values are <span className="text-down font-medium">red</span>.</li>
               <li><strong>Assumptions:</strong> daily closes only; no fees/slippage/leverage; one position at a time.</li>
@@ -719,16 +782,18 @@ export default function App() {
                 <label className="text-sm sm:col-span-2">
                   <div className="mb-1 text-[var(--text)]/80">Strategy</div>
                   <select className="input" value={strategy} onChange={(e) => setStrategy(e.target.value as StrategyKey)}>
-                    <option value="breakout">Breakout (threshold)</option>
-                    <option value="sma_cross">SMA Crossover</option>
-                    <option value="mean_rev">Mean Reversion</option>
+                    <option value="legacy_absolute">Absolute Threshold (legacy)</option>
+                    <option value="breakout_pct">Breakout (Percent)</option>
+                    <option value="breakout_atr">Breakout (ATR)</option>
+                    <option value="mean_reversion">Mean Reversion (SMA)</option>
                   </select>
                 </label>
 
-                {strategy === "breakout" && (
+                {/* LEGACY: absolute threshold */}
+                {strategy === "legacy_absolute" && (
                   <>
                     <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">Threshold</div>
+                      <div className="mb-1 text-[var(--text)]/80">Threshold (absolute price)</div>
                       <input
                         className={"input " + (thrInvalid ? "ring-2 ring-[var(--down)]" : "")}
                         inputMode="decimal"
@@ -753,28 +818,92 @@ export default function App() {
                   </>
                 )}
 
-                {strategy === "sma_cross" && (
+                {/* BREAKOUT (Percent) */}
+                {strategy === "breakout_pct" && (
                   <>
                     <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">Fast SMA</div>
-                      <input className="input" inputMode="numeric" value={fast} onChange={(e)=>setFast(e.target.value)} placeholder="e.g. 10" />
+                      <div className="mb-1 text-[var(--text)]/80">Lookback (days)</div>
+                      <input className="input" inputMode="numeric" value={lookback} onChange={(e)=>setLookback(e.target.value)} placeholder="e.g. 20" />
                     </label>
                     <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">Slow SMA</div>
-                      <input className="input" inputMode="numeric" value={slow} onChange={(e)=>setSlow(e.target.value)} placeholder="e.g. 30" />
+                      <div className="mb-1 text-[var(--text)]/80">Threshold % (fraction)</div>
+                      <input className="input" inputMode="decimal" step="any" value={thresholdPct} onChange={(e)=>setThresholdPct(e.target.value)} placeholder="e.g. 0.003 = 0.3%" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Max Hold Days</div>
+                      <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={maxHoldDays} onChange={(e)=>setMaxHoldDays(e.target.value)} placeholder="e.g. 5" />
                     </label>
                   </>
                 )}
 
-                {strategy === "mean_rev" && (
+                {/* BREAKOUT (ATR) */}
+                {strategy === "breakout_atr" && (
                   <>
                     <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">Drop % (from recent close)</div>
-                      <input className="input" inputMode="decimal" step="any" value={revDropPct} onChange={(e)=>setRevDropPct(e.target.value)} placeholder="e.g. 2.0" />
+                      <div className="mb-1 text-[var(--text)]/80">Lookback (days)</div>
+                      <input className="input" inputMode="numeric" value={lookback} onChange={(e)=>setLookback(e.target.value)} placeholder="e.g. 20" />
                     </label>
                     <label className="text-sm">
-                      <div className="mb-1 text-[var(--text)]/80">Hold Days</div>
-                      <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={holdDays} onChange={(e)=>setHoldDays(e.target.value)} placeholder=">= 1" />
+                      <div className="mb-1 text-[var(--text)]/80">ATR Multiplier (k)</div>
+                      <input className="input" inputMode="decimal" step="any" value={atrK} onChange={(e)=>setAtrK(e.target.value)} placeholder="e.g. 0.5" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Max Hold Days</div>
+                      <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={maxHoldDays} onChange={(e)=>setMaxHoldDays(e.target.value)} placeholder="e.g. 5" />
+                    </label>
+                  </>
+                )}
+
+                {/* MEAN REVERSION */}
+                {strategy === "mean_reversion" && (
+                  <>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">SMA Lookback (days)</div>
+                      <input className="input" inputMode="numeric" value={lookback} onChange={(e)=>setLookback(e.target.value)} placeholder="e.g. 20" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Drop % (enter number like 2 for 2%)</div>
+                      <input className="input" inputMode="decimal" step="any" value={revDropPct} onChange={(e)=>setRevDropPct(e.target.value)} placeholder="e.g. 2" />
+                    </label>
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Max Hold Days</div>
+                      <input className="input" inputMode="numeric" pattern="[0-9]*" min={1} value={maxHoldDays} onChange={(e)=>setMaxHoldDays(e.target.value)} placeholder="e.g. 1" />
+                    </label>
+                  </>
+                )}
+
+                {/* Common controls for non-legacy strategies */}
+                {strategy !== "legacy_absolute" && (
+                  <>
+                    <div className="sm:col-span-2 grid grid-cols-2 gap-3">
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={allowLong} onChange={(e)=>setAllowLong(e.target.checked)} />
+                        <span>Allow Long</span>
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={allowShort} onChange={(e)=>setAllowShort(e.target.checked)} />
+                        <span>Allow Short</span>
+                      </label>
+                    </div>
+
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Take Profit (fraction)</div>
+                      <input className="input" inputMode="decimal" step="any" value={takeProfitPct} onChange={(e)=>setTakeProfitPct(e.target.value)} placeholder="e.g. 0.02 = 2%" />
+                    </label>
+
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Stop Loss (fraction)</div>
+                      <input className="input" inputMode="decimal" step="any" value={stopLossPct} onChange={(e)=>setStopLossPct(e.target.value)} placeholder="e.g. 0.01 = 1%" />
+                    </label>
+
+                    <label className="text-sm">
+                      <div className="mb-1 text-[var(--text)]/80">Cooldown Days</div>
+                      <input className="input" inputMode="numeric" pattern="[0-9]*" min={0} value={cooldownDays} onChange={(e)=>setCooldownDays(e.target.value)} placeholder="e.g. 0" />
+                    </label>
+
+                    <label className="text-sm inline-flex items-center gap-2">
+                      <input type="checkbox" checked={allowImmediateReentry} onChange={(e)=>setAllowImmediateReentry(e.target.checked)} />
+                      <span className="text-[var(--text)]/80">Allow Immediate Re-entry</span>
                     </label>
                   </>
                 )}
@@ -793,28 +922,36 @@ export default function App() {
               {/* Strategy explanations */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 text-[13px] leading-6">
                 <div className="font-semibold text-[var(--text)] mb-1">How this works</div>
-                {strategy === "breakout" && (
+                {strategy === "legacy_absolute" && (
                   <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
-                    <li><strong>Intent:</strong> catch momentum when price <em>closes above</em> a user-set <strong>Threshold</strong>.</li>
-                    <li><strong>Entry:</strong> first daily close ≥ Threshold opens a single long position next bar.</li>
-                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong> bars; P&amp;L realized on exits.</li>
+                    <li><strong>Intent:</strong> close crosses a fixed <strong>price threshold</strong> from below.</li>
+                    <li><strong>Entry:</strong> first daily close ≥ Threshold.</li>
+                    <li><strong>Exit:</strong> after <strong>Hold Days</strong> bars.</li>
                     <li><strong>Tip:</strong> start near Peek’s <em>Suggested Threshold</em>, then sweep ±2–5%.</li>
                   </ul>
                 )}
-                {strategy === "sma_cross" && (
+                {strategy === "breakout_pct" && (
                   <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
-                    <li><strong>Intent:</strong> ride trends when short-term average outruns long-term average.</li>
-                    <li><strong>Entry:</strong> long when <strong>Fast SMA</strong> crosses above <strong>Slow SMA</strong>.</li>
-                    <li><strong>Exit:</strong> on reverse cross (or fixed horizon variant if supported).</li>
-                    <li><strong>Tip:</strong> try (5/20), (10/30), (20/50); requiring price &gt; Slow SMA can reduce chop.</li>
+                    <li><strong>Intent:</strong> momentum on closes breaking prior highs/lows by a <strong>%</strong>.</li>
+                    <li><strong>Adaptive:</strong> if left blank, threshold% auto-scales to volatility.</li>
+                    <li><strong>Exit:</strong> TP/SL or <strong>Max Hold Days</strong>, whichever first.</li>
+                    <li><strong>Tip:</strong> short holds + both directions = more trades.</li>
                   </ul>
                 )}
-                {strategy === "mean_rev" && (
+                {strategy === "breakout_atr" && (
                   <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
-                    <li><strong>Intent:</strong> buy dips expecting a short-term snap-back.</li>
-                    <li><strong>Entry:</strong> long when price drops at least <strong>Drop %</strong> from the prior close.</li>
-                    <li><strong>Exit:</strong> fixed horizon after <strong>Hold Days</strong>.</li>
-                    <li><strong>Tip:</strong> sweep Drop % in 1–4 and Hold Days in 2–4.</li>
+                    <li><strong>Intent:</strong> momentum using <strong>ATR</strong> buffer above/below extremes.</li>
+                    <li><strong>Adaptive:</strong> ATR multiplier <em>k</em> defaults relative to realized ATR.</li>
+                    <li><strong>Exit:</strong> TP/SL or <strong>Max Hold Days</strong>.</li>
+                    <li><strong>Tip:</strong> try k ≈ 0.4–0.6 for denser signals.</li>
+                  </ul>
+                )}
+                {strategy === "mean_reversion" && (
+                  <ul className="list-disc ml-5 text-[var(--text)]/80 space-y-1">
+                    <li><strong>Intent:</strong> buy dips / sell rips vs SMA; quick snap-backs.</li>
+                    <li><strong>Adaptive:</strong> <strong>Drop %</strong> (e.g., 2) becomes 0.02; defaults scale with vol.</li>
+                    <li><strong>Exit:</strong> on mean-touch or <strong>Max Hold Days</strong>.</li>
+                    <li><strong>Tip:</strong> 1–2 hold days with small drops ↑ trades.</li>
                   </ul>
                 )}
               </div>
@@ -1058,7 +1195,6 @@ export default function App() {
     )}
   </div>
 
-
                   <OptimizerPanel
                     strategy={strategy}
                     result={result}
@@ -1151,12 +1287,14 @@ function OptimizerPanel({
   if (Math.abs(ann) < 0.02 && trades.length >= 10) sugg.push("Low annualized return — sweep nearby parameters.");
   if (Number.isFinite(avgBars) && Number.isFinite(hdCfg) && avgBars > hdCfg + 0.5) sugg.push("Average bars exceed configured hold — verify alignment.");
 
-  if (strategy === "breakout") {
-    sugg.unshift("Breakout: try threshold ±2–5% around suggested and hold 2–5 days.");
-  } else if (strategy === "sma_cross") {
-    sugg.unshift("SMA Cross: test 5/20, 10/30, 20/50; require price above slow to reduce chop.");
-  } else if (strategy === "mean_rev") {
-    sugg.unshift("Mean Reversion: sweep drop% 1–4 and short holds (2–4 days).");
+  if (strategy === "legacy_absolute") {
+    sugg.unshift("Legacy: try threshold ±2–5% around suggested and hold 2–5 days.");
+  } else if (strategy === "breakout_pct") {
+    sugg.unshift("Breakout%: use lower threshold% and short holds (3–6) to increase trades.");
+  } else if (strategy === "breakout_atr") {
+    sugg.unshift("Breakout ATR: smaller k (0.4–0.6) and short holds increase turnover.");
+  } else if (strategy === "mean_reversion") {
+    sugg.unshift("Mean Reversion: small drop% (1–3) and 1–2 hold days boost trade count.");
   }
   if (sugg.length < 2) sugg.push("Run a quick parameter sweep near current settings.");
 
