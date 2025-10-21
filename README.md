@@ -1,13 +1,10 @@
 # 📈 SSMIF Backtest Visualizer
 
+Deployed at: https://jumbomuffin101.github.io/ssmif-quant-dev/
+
 An interactive **trading analytics dashboard** built by **Aryan Rawat** for the Stevens Student Managed Investment Fund (**SSMIF**).  
 It allows users to explore historical stock data, test trading strategies, and visualize performance metrics — all through a sleek, fast, and responsive web interface.
 
----
-
-## 🧠 System Overview
-
-```mermaid
 flowchart LR
     A[Frontend<br/>(React + Tailwind + Recharts)] -->|POST /peek, /backtest| B[Serverless Backend<br/>(Netlify Function / Cloudflare Worker)]
     B -->|Fetch OHLC Data| C[(Yahoo Finance API + Stooq Backup)]
