@@ -1,148 +1,84 @@
-# 📈 SSMIF Backtest Visualizer
+**Trading Analytics Dashboard**
 
-Deployed at: https://jumbomuffin101.github.io/ssmif-quant-dev/
+Live Demo: [https://jumbomuffin101.github.io/ssmif-quant-dev/](url)
 
-An interactive **trading analytics dashboard** built by **Aryan Rawat** for the Stevens Student Managed Investment Fund (**SSMIF**).  
-It allows users to explore historical stock data, test trading strategies, and visualize performance metrics — all through a sleek, fast, and responsive web interface.
+An interactive trading analytics dashboard built by Aryan Rawat for the Stevens Student Managed Investment Fund (SSMIF).
+The platform allows users to explore historical stock data, test trading strategies, and visualize performance metrics through a responsive web interface.
 
-flowchart LR
-    A[Frontend<br/>(React + Tailwind + Recharts)] -->|POST /peek, /backtest| B[Serverless Backend<br/>(Netlify Function / Cloudflare Worker)]
-    B -->|Fetch OHLC Data| C[(Yahoo Finance API + Stooq Backup)]
-    B --> D[Computation Layer<br/>(PnL, Equity Curve, Metrics, Trades)]
-    D --> A[Charts & Metrics Dashboard]
-Data Flow
-User Input – Choose a symbol, start/end dates, and strategy parameters.
 
-Frontend → Backend – Sends a JSON request to /peek or /backtest.
+**Overview**
 
-Backend – Fetches OHLC data from Yahoo Finance (with Stooq fallback) and computes:
+This project combines a React + TypeScript frontend with a lightweight serverless backend (Netlify Functions / Cloudflare Workers).
+It fetches OHLC data from Yahoo Finance (with a Stooq fallback) and computes detailed analytics including equity curves, drawdowns, and win rates.
 
-Equity curve
 
-Profit/Loss
+**Data Flow**
 
-Win Rate
+User Input: Choose a stock symbol, date range, and strategy parameters.
 
-Annualized Return
+Frontend → Backend: Sends a JSON request to /peek or /backtest.
 
-Drawdown
+Backend: Fetches OHLC data, calculates PnL, drawdown, equity curve, and metrics.
 
-Response → UI – Normalized JSON feeds interactive charts and trade tables using Recharts.
+Response → UI: Returns JSON that powers interactive charts and tables.
 
-🚀 Features
-🔍 Peek Market Snapshot – Instantly view recent min/median/max closes and a suggested entry threshold.
 
-📊 Strategy Backtesting – Test breakout, SMA crossover, and mean-reversion strategies.
 
-📈 Interactive Visualization – Smooth charts for equity, price, and drawdown performance.
+**Features**
 
-💡 Detailed Metrics – Profit Factor, Drawdown, Win Rate, Annualized Return, and more.
+Market Snapshot: Instantly view recent high, low, and median closes with suggested entry thresholds.
 
-⚡ Fast & Responsive – Powered by React + TypeScript + Vite + TailwindCSS.
+Backtesting Engine: Supports breakout, SMA crossover, and mean-reversion strategies.
 
-🧱 Tech Stack
-Layer	Technology
-Frontend	React • TypeScript • Vite • TailwindCSS • Recharts
-Backend	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
-Data Source	Yahoo Finance API (+ Stooq backup)
-Deployment	Netlify (frontend) + Cloudflare Workers (API)
+Interactive Charts: Built with Recharts for smooth and responsive visualization.
 
-⚙️ Local Setup
-1️⃣ Clone the Repository
-bash
-Copy code
-git clone https://github.com/jumbomuffin101/ssmif-quant-dev.git
-cd ssmif-quant-dev
-2️⃣ Frontend Setup
-bash
-Copy code
-cd frontend
-npm install
-npm run dev
-Then open http://localhost:5173
+Detailed Metrics: Includes Profit Factor, Max Drawdown, Annualized Return, and Win Rate.
 
-3️⃣ Backend (optional local test)
-bash
-Copy code
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-Check health:
+Modern Stack: Optimized using React, TypeScript, and TailwindCSS.
 
-arduino
-Copy code
-http://127.0.0.1:8000/status
-🌐 Deployment
-✅ Netlify (Frontend)
-toml
-Copy code
+
+**Tech Stack**
+Layer	Technologies
+Frontend:	React + TypeScript + Vite + TailwindCSS + Recharts
+Backend:	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
+Data: Source	Yahoo Finance API (+ Stooq backup)
+Deployment:	Netlify (frontend) + Cloudflare Workers (API)
+
+
+**Deployment**
+Netlify (Frontend)
 [build]
-  base = "frontend"
-  command = "npm ci && npm run build"
-  publish = "dist"
+base = "frontend"
+command = "npm ci && npm run build"
+publish = "dist"
 
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-  force = true
-☁️ Cloudflare Worker (API)
-Deployed at:
-https://ssmif-api.<your-namespace>.workers.dev
+from = "/api/*"
+to = "/.netlify/functions/:splat"
+status = 200
+force = true
+
+
+**Cloudflare Worker (API)**
+
+Deployed at: [https://ssmif-api..workers.dev](https://ssmif-api.ryanrawat.workers.dev/)
 
 Test endpoint:
+curl https://ssmif-api..workers.dev/status
 
-bash
-Copy code
-curl https://ssmif-api.<your-namespace>.workers.dev/status
-📊 Example API Usage
-/peek
-bash
-Copy code
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"symbol":"SPY","start":"2025-05-01","end":"2025-08-29"}' \
-  https://ssmif-api.<your-namespace>.workers.dev/peek
-/backtest
-bash
-Copy code
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"symbol":"AAPL","threshold":180.5,"hold_days":4,"start":"2025-06-01","end":"2025-09-30"}' \
-  https://ssmif-api.<your-namespace>.workers.dev/backtest
-🧮 Key Metrics Explained
+
+**Key Metrics**
 Metric	Description
-PnL	Profit / Loss (USD)
+PnL	Total profit or loss in USD
 Win Rate	Percentage of profitable trades
-Annualized Return	CAGR based on equity growth
-Max Drawdown	Largest peak-to-trough equity drop
-Profit Factor	Total Profit ÷ Total Loss
-Avg Hold Period	Mean bars held per trade
+Annualized Return	Compound annual growth rate (CAGR)
+Max Drawdown	Largest peak-to-trough equity decline
+Profit Factor	Total profit ÷ total loss
+Avg Hold Period	Average number of bars held per trade
 
-🗂️ Project Structure
-pgsql
-Copy code
-ssmif-quant-dev/
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── index.css
-│   │   └── components/
-│   ├── vite.config.ts
-│   └── package.json
-├── backend/
-│   ├── main.py
-│   └── requirements.txt
-├── netlify/
-│   └── functions/
-└── README.md
-🧩 API Endpoints
+
+**API Endpoints**
 Method	Endpoint	Description
 GET	/status	Health check
 POST	/peek	Fetch market snapshot
 POST	/backtest	Run threshold-based backtest
-
-👤 Author
-Aryan Rawat
-Stevens Institute of Technology — School of Systems & Enterprises
-Quantitative Finance • Software Systems • Applied AI
-
-GitHub: @JumboMuffin101
