@@ -77,24 +77,6 @@ Profit Factor	Total profit ÷ total loss
 Avg Hold Period	Average number of bars held per trade
 
 
-**Project Structure**
-
-ssmif-quant-dev/
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── index.css
-│   │   └── components/
-│   ├── vite.config.ts
-│   └── package.json
-├── backend/
-│   ├── main.py
-│   └── requirements.txt
-├── netlify/
-│   └── functions/
-└── README.md
-
-
 **API Endpoints**
 Method	Endpoint	Description
 GET	/status	Health check
