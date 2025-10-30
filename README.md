@@ -78,6 +78,7 @@ Avg Hold Period	Average number of bars held per trade
 
 
 **Project Structure**
+
 ssmif-quant-dev/
 ├── frontend/
 │   ├── src/
