@@ -39,10 +39,10 @@ Modern Stack: Optimized using React, TypeScript, and TailwindCSS.
 
 **Tech Stack**
 Layer	Technologies
-Frontend	React • TypeScript • Vite • TailwindCSS • Recharts
-Backend	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
-Data Source	Yahoo Finance API (+ Stooq backup)
-Deployment	Netlify (frontend) + Cloudflare Workers (API)
+Frontend:	React + TypeScript + Vite + TailwindCSS + Recharts
+Backend:	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
+Data: Source	Yahoo Finance API (+ Stooq backup)
+Deployment:	Netlify (frontend) + Cloudflare Workers (API)
 
 
 **Deployment**
