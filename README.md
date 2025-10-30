@@ -1,23 +1,22 @@
-Trading Analytics Dashboard
+**Trading Analytics Dashboard**
 
 Live Demo: [https://jumbomuffin101.github.io/ssmif-quant-dev/](url)
 
 An interactive trading analytics dashboard built by Aryan Rawat for the Stevens Student Managed Investment Fund (SSMIF).
 The platform allows users to explore historical stock data, test trading strategies, and visualize performance metrics through a responsive web interface.
 
-Overview
+**Overview**
 
 This project combines a React + TypeScript frontend with a lightweight serverless backend (Netlify Functions / Cloudflare Workers).
 It fetches OHLC data from Yahoo Finance (with a Stooq fallback) and computes detailed analytics including equity curves, drawdowns, and win rates.
 
-flowchart LR
+**flowchart LR**
     A[Frontend<br/>(React + Tailwind + Recharts)] -->|POST /peek, /backtest| B[Serverless Backend<br/>(Netlify Function / Cloudflare Worker)]
     B -->|Fetch OHLC Data| C[(Yahoo Finance API<br/>+ Stooq Backup)]
     B --> D[Computation Layer<br/>(PnL, Equity Curve, Metrics, Trades)]
     D --> A[Charts & Metrics Dashboard]
 
-Data Flow
-
+**Data Flow**
 User Input: Choose a stock symbol, date range, and strategy parameters.
 
 Frontend → Backend: Sends a JSON request to /peek or /backtest.
@@ -38,7 +37,7 @@ Detailed Metrics: Includes Profit Factor, Max Drawdown, Annualized Return, and W
 
 Modern Stack: Optimized using React, TypeScript, and TailwindCSS.
 
-Tech Stack
+**Tech Stack**
 Layer	Technologies
 Frontend	React • TypeScript • Vite • TailwindCSS • Recharts
 Backend	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
