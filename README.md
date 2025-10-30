@@ -1,4 +1,4 @@
-# 📈 SSMIF Quant Backtest Visualizer
+# Trading Analytics Dashboard
 
 **Deployed at:** [https://jumbomuffin101.github.io/ssmif-quant-dev/](https://jumbomuffin101.github.io/ssmif-quant-dev/)
 
@@ -7,7 +7,7 @@ It allows users to explore historical stock data, test trading strategies, and v
 
 ---
 
-## 🧠 System Architecture
+## System Architecture
 
 ```mermaid
 flowchart LR
@@ -15,7 +15,7 @@ flowchart LR
     B -->|Fetch OHLC Data| C[(Yahoo Finance API<br/>+ Stooq Backup)]
     B --> D[Computation Layer<br/>(PnL, Equity Curve, Metrics, Trades)]
     D --> A[Charts & Metrics Dashboard]
-🔄 Data Flow
+ Data Flow
 User Input – Choose a symbol, start/end dates, and strategy parameters.
 
 Frontend → Backend – Sends a JSON request to /peek or /backtest.
@@ -34,25 +34,25 @@ Drawdown
 
 Response → UI – Normalized JSON powers dynamic charts and trade tables.
 
-🚀 Features
-🔍 Peek Market Snapshot – Instantly view recent min/median/max closes and a suggested entry threshold.
+Features
+Peek Market Snapshot – Instantly view recent min/median/max closes and a suggested entry threshold.
 
-📊 Strategy Backtesting – Test breakout, SMA crossover, and mean-reversion strategies.
+Strategy Backtesting – Test breakout, SMA crossover, and mean-reversion strategies.
 
-📈 Interactive Visualization – Smooth equity, price, and drawdown charts with Recharts.
+Interactive Visualization – Smooth equity, price, and drawdown charts with Recharts.
 
-💡 Detailed Metrics – Profit Factor, Max Drawdown, Win Rate, Annualized Return, and more.
+Detailed Metrics – Profit Factor, Max Drawdown, Win Rate, Annualized Return, and more.
 
-⚡ Fast & Responsive – Built with React + TypeScript + Vite + TailwindCSS.
+Fast & Responsive – Built with React + TypeScript + Vite + TailwindCSS.
 
-🧱 Tech Stack
+  Tech Stack
 Layer	Technology
 Frontend	React • TypeScript • Vite • TailwindCSS • Recharts
 Backend	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
 Data Source	Yahoo Finance API (+ Stooq backup)
 Deployment	Netlify (frontend) + Cloudflare Workers (API)
 
-⚙️ Local Setup
+  Local Setup
 1️⃣ Clone the Repository
 bash
 Copy code
@@ -77,8 +77,8 @@ Check health:
 arduino
 Copy code
 http://127.0.0.1:8000/status
-🌐 Deployment
-✅ Netlify (Frontend)
+  Deployment
+Netlify (Frontend)
 toml
 Copy code
 [build]
