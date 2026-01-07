@@ -1,8 +1,8 @@
 **Trading Analytics Dashboard**
 
-Live Demo: [https://jumbomuffin101.github.io/ssmif-quant-dev/](url)
+Live Demo: https://jumbomuffin101.github.io/Trading-Analytics-Dashboard/
 
-An interactive trading analytics dashboard built by Aryan Rawat for the Stevens Student Managed Investment Fund (SSMIF).
+An interactive trading analytics dashboard built by Aryan Rawat.
 The platform allows users to explore historical stock data, test trading strategies, and visualize performance metrics through a responsive web interface.
 
 
