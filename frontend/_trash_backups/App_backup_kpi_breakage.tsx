@@ -212,7 +212,7 @@ export default function App() {
         <div className="relative mx-auto max-w-6xl px-4 pt-12 pb-14">
           <div className="flex items-center gap-3">
             <div className="h-11 w-11 rounded-xl bg-bull-600 flex items-center justify-center font-black">$</div>
-            <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
+            <h1 className="text-4xl font-bold">Trading Analytics Dashboard</h1>
           </div>
           <p className="mt-3 text-slate-300 text-base max-w-3xl">
             Interactive backtesting sandbox built with FastAPI and React. It ingests historical prices on-demand,
