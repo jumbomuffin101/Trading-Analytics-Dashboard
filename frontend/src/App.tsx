@@ -696,7 +696,7 @@ export default function App() {
               <div className="h-11 w-11 rounded-xl bg-[var(--accent)] text-[#0b0c10] flex items-center justify-center font-black">
                 $
               </div>
-              <h1 className="text-4xl font-bold">SSMIF Backtest Visualizer</h1>
+              <h1 className="text-4xl font-bold">Trading Analytics Dashboard</h1>
             </div>
           </div>
         </div>
