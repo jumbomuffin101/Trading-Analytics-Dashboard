@@ -1,84 +1,92 @@
-**Trading Analytics Dashboard**
+# Trading Analytics Dashboard
 
-Live Demo: https://jumbomuffin101.github.io/Trading-Analytics-Dashboard/
+Live Demo:  
+https://jumbomuffin101.github.io/Trading-Analytics-Dashboard/
 
-An interactive trading analytics dashboard built by Aryan Rawat.
-The platform allows users to explore historical stock data, test trading strategies, and visualize performance metrics through a responsive web interface.
+Trading Analytics Dashboard is an interactive web app for exploring historical stock data, testing simple trading strategies, and visualizing performance metrics. The project is designed as a decision support tool for understanding how different entry and exit rules behave over time, rather than as a production trading system.
 
+The focus is on clarity, explainability, and fast iteration on strategy ideas.
 
-**Overview**
+---
 
-This project combines a React + TypeScript frontend with a lightweight serverless backend (Netlify Functions / Cloudflare Workers).
-It fetches OHLC data from Yahoo Finance (with a Stooq fallback) and computes detailed analytics including equity curves, drawdowns, and win rates.
+## Overview
 
+The application consists of a React and TypeScript frontend paired with a lightweight API that handles market data retrieval and backtest computation.
 
-**Data Flow**
+Users can select a symbol, date range, and strategy parameters, preview market conditions, and run backtests that return equity curves, drawdowns, and trade level statistics. Results are presented through interactive charts and tables optimized for exploration rather than automation.
 
-User Input: Choose a stock symbol, date range, and strategy parameters.
+This project was built to support research and experimentation workflows within the Stevens Student Managed Investment Fund (SSMIF).
 
-Frontend → Backend: Sends a JSON request to /peek or /backtest.
+---
 
-Backend: Fetches OHLC data, calculates PnL, drawdown, equity curve, and metrics.
+## Data Flow
 
-Response → UI: Returns JSON that powers interactive charts and tables.
+1. User selects a symbol, date range, and strategy parameters.
+2. The frontend sends a JSON request to `/peek` or `/backtest`.
+3. The backend fetches OHLC data and computes trades, equity, and metrics.
+4. The response is returned to the frontend and rendered as charts and summaries.
 
+All calculations are performed server side to keep the UI lightweight and deterministic.
 
+---
 
-**Features**
+## Features
 
-Market Snapshot: Instantly view recent high, low, and median closes with suggested entry thresholds.
+- **Market Snapshot (Peek)**  
+  Quickly inspect recent price behavior, including minimum, median, and maximum closes, along with a suggested threshold for exploration.
 
-Backtesting Engine: Supports breakout, SMA crossover, and mean-reversion strategies.
+- **Backtesting Engine**  
+  Supports absolute breakout, percentage breakout, ATR based breakout, and mean reversion strategies.
 
-Interactive Charts: Built with Recharts for smooth and responsive visualization.
+- **Interactive Visualizations**  
+  Equity curves, price charts with entry and exit markers, and drawdown views built with Recharts.
 
-Detailed Metrics: Includes Profit Factor, Max Drawdown, Annualized Return, and Win Rate.
+- **Trade Level Analysis**  
+  View individual trades as cards or tables with PnL, return percentage, and holding period.
 
-Modern Stack: Optimized using React, TypeScript, and TailwindCSS.
+- **Explainable Metrics**  
+  Includes total PnL, win rate, annualized return, max drawdown, profit factor, and average holding duration.
 
+---
 
-**Tech Stack**
-Layer	Technologies
-Frontend:	React + TypeScript + Vite + TailwindCSS + Recharts
-Backend:	Netlify Functions / Cloudflare Workers (FastAPI-style logic)
-Data: Source	Yahoo Finance API (+ Stooq backup)
-Deployment:	Netlify (frontend) + Cloudflare Workers (API)
+## Tech Stack
 
+**Frontend**
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Recharts
+
+**Backend**
+- Python (FastAPI style API)
+- Serverless friendly design
+
+**Market Data**
+- Yahoo Finance
+- Stooq fallback for availability
 
 **Deployment**
-Netlify (Frontend)
-[build]
-base = "frontend"
-command = "npm ci && npm run build"
-publish = "dist"
+- GitHub Pages for the frontend
+- Serverless API deployment for backtest computation
 
-[[redirects]]
-from = "/api/*"
-to = "/.netlify/functions/:splat"
-status = 200
-force = true
+---
 
+## Assumptions and Limitations
 
-**Cloudflare Worker (API)**
+- Daily close data only
+- No transaction costs, slippage, or leverage
+- One position at a time
+- Not a trading signal generator or financial advice tool
 
-Deployed at: [https://ssmif-api..workers.dev](https://ssmif-api.ryanrawat.workers.dev/)
+The dashboard is intended for educational and analytical use.
 
-Test endpoint:
-curl https://ssmif-api..workers.dev/status
+---
 
+## API Endpoints
 
-**Key Metrics**
-Metric	Description
-PnL	Total profit or loss in USD
-Win Rate	Percentage of profitable trades
-Annualized Return	Compound annual growth rate (CAGR)
-Max Drawdown	Largest peak-to-trough equity decline
-Profit Factor	Total profit ÷ total loss
-Avg Hold Period	Average number of bars held per trade
-
-
-**API Endpoints**
-Method	Endpoint	Description
-GET	/status	Health check
-POST	/peek	Fetch market snapshot
-POST	/backtest	Run threshold-based backtest
+| Method | Endpoint   | Description              |
+|------|------------|--------------------------|
+| GET  | /status    | Health check             |
+| POST | /peek      | Market snapshot          |
+| POST | /backtest  | Run strategy backtest    |
